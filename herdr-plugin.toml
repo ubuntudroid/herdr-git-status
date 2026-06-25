@@ -33,13 +33,13 @@ placement = "split"
 command = ["bash", "ci-pane.sh"]
 
 [[keys.command]]
-key = "prefix+alt+g"
+key = "prefix+i"
 type = "plugin_action"
 command = "gitlab-ci-status.toggle"
 description = "Toggle GitLab CI status dots"
 
 [[keys.command]]
-key = "prefix+alt+c"
+key = "prefix+shift+i"
 type = "plugin_action"
 command = "gitlab-ci-status.open"
 description = "GitLab CI status pane"

@@ -41,11 +41,11 @@ herdr plugin list        # confirm "gitlab-ci-status" is registered
 
 ## Usage
 
-**Sidebar dots:** press **`ctrl+b`** then **`alt+g`** to toggle the poller on/off. While on, every space's
+**Sidebar dots:** press **`ctrl+b`** then **`i`** to toggle the poller on/off. While on, every space's
 label gets a colored CI dot, refreshed every 30s. Toggling off (or `herdr plugin action invoke
 gitlab-ci-status.stop`) removes the dots and restores your original labels.
 
-**Detail pane:** press **`ctrl+b`** then **`alt+c`** in a GitLab workspace to open a split pane showing
+**Detail pane:** press **`ctrl+b`** then **`Shift+I`** in a GitLab workspace to open a split pane showing
 the project link, branch, and latest pipeline. In the pane: **`r`** refresh, **`q`** quit (`Ctrl-C` also
 closes it). The branch is re-read every refresh, so switching branches updates automatically.
 
