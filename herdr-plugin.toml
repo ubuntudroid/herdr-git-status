@@ -32,14 +32,17 @@ title = "GitLab CI"
 placement = "split"
 command = ["bash", "ci-pane.sh"]
 
-[[keys.command]]
-key = "prefix+i"
-type = "plugin_action"
-command = "gitlab-ci-status.toggle"
-description = "Toggle GitLab CI status dots"
-
-[[keys.command]]
-key = "prefix+shift+i"
-type = "plugin_action"
-command = "gitlab-ci-status.open"
-description = "GitLab CI status pane"
+# NOTE: herdr 0.7 does NOT bind keys declared in a plugin manifest, so there are no
+# [[keys.command]] entries here. Bind keys in your ~/.config/herdr/config.toml instead:
+#
+#   [[keys.command]]
+#   key = "prefix+i"
+#   type = "shell"
+#   command = "herdr plugin action invoke gitlab-ci-status.toggle"
+#
+#   [[keys.command]]
+#   key = "prefix+shift+i"
+#   type = "shell"
+#   command = "herdr plugin action invoke gitlab-ci-status.open"
+#
+# Then run: herdr server reload-config

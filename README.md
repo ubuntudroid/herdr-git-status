@@ -39,15 +39,35 @@ herdr plugin list        # confirm "gitlab-ci-status" is registered
 
 `herdr plugin link` is for local development and runs no build step — none is needed (pure Bash).
 
+## Keybindings (one-time setup)
+
+herdr 0.7 does **not** bind keys declared in a plugin manifest, so add the bindings to your
+`~/.config/herdr/config.toml` and run `herdr server reload-config`:
+
+```toml
+[[keys.command]]
+key = "prefix+i"
+type = "shell"
+command = "herdr plugin action invoke gitlab-ci-status.toggle"
+
+[[keys.command]]
+key = "prefix+shift+i"
+type = "shell"
+command = "herdr plugin action invoke gitlab-ci-status.open"
+```
+
+(`prefix` is `ctrl+b`. You can also trigger the actions any time without a keybinding via
+`herdr plugin action invoke gitlab-ci-status.<toggle|start|stop|open>`.)
+
 ## Usage
 
-**Sidebar dots:** press **`ctrl+b`** then **`i`** to toggle the poller on/off. While on, every space's
-label gets a colored CI dot, refreshed every 30s. Toggling off (or `herdr plugin action invoke
+**Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space's label gets a
+colored CI dot, refreshed every 30s. Toggling off (or `herdr plugin action invoke
 gitlab-ci-status.stop`) removes the dots and restores your original labels.
 
-**Detail pane:** press **`ctrl+b`** then **`Shift+I`** in a GitLab workspace to open a split pane showing
-the project link, branch, and latest pipeline. In the pane: **`r`** refresh, **`q`** quit (`Ctrl-C` also
-closes it). The branch is re-read every refresh, so switching branches updates automatically.
+**Detail pane:** `ctrl+b` then `Shift+I` in a GitLab workspace opens a split pane showing the project
+link, branch, and latest pipeline. In the pane: **`r`** refresh, **`q`** quit (`Ctrl-C` also closes it).
+The branch is re-read every refresh, so switching branches updates automatically.
 
 > **Note on MR pipelines:** status is looked up for the *branch* ref. Projects that run CI only as
 > merge-request pipelines (common in some GitLab setups) show ⚪ on a feature branch until it has a branch
@@ -63,7 +83,8 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
 
 - `GITLAB_CI_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
 
-To change keybindings or pane placement, edit `herdr-plugin.toml` and re-link.
+To change keybindings, edit the `[[keys.command]]` entries in your `config.toml` (see above). For pane
+placement, edit `herdr-plugin.toml` and re-link.
 
 ## How it works
 
