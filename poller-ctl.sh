@@ -26,19 +26,27 @@ ws_list() {
     | jq -r '(.result.workspaces // .workspaces // .)[] | "\(.workspace_id)\t\(.label)"'
 }
 
-# cwd -> emoji ("" = not a GitLab repo; "SKIP" = transient error, leave label as-is)
-emoji_for_repo() {
-  local cwd="$1" pipe rc st
-  gci_latest_pipeline "$cwd"; rc=$?; pipe="$GCI_PIPE"
+# Resolve a repo's sidebar decoration into globals (NOT stdout) so it can run
+# without a subshell — that lets the MR lookup reuse the path/branch that
+# gci_latest_pipeline just resolved:
+#   SPACE_EMOJI  status emoji, "" (not a GitLab repo), or "SKIP" (transient error)
+#   SPACE_MR     open-MR iid (e.g. 123) or "" (none / not applicable)
+status_for_repo() {
+  local cwd="$1" rc st
+  SPACE_EMOJI=""; SPACE_MR=""
+  gci_latest_pipeline "$cwd"; rc=$?
   case $rc in
-    1|2|3|4) printf '' ;;
-    5)       printf 'SKIP' ;;
-    0)       if [ -n "$pipe" ]; then
-               st="$(printf '%s' "$pipe" | jq -r '.status // "unknown"')"
-               gci_status_emoji "$st"
-             else
-               printf '⚪'   # GitLab repo, but no pipeline for this branch
-             fi ;;
+    1|2|3|4) return ;;
+    5)       SPACE_EMOJI="SKIP"; return ;;
+    0)
+      if [ -n "$GCI_PIPE" ]; then
+        st="$(printf '%s' "$GCI_PIPE" | jq -r '.status // "unknown"')"
+        SPACE_EMOJI="$(gci_status_emoji "$st")"
+      else
+        SPACE_EMOJI="⚪"   # GitLab repo, but no pipeline for this branch
+      fi
+      gci_open_mr "$cwd" "$GCI_PATH" "$GCI_BRANCH" && SPACE_MR="$GCI_MR_IID"
+      ;;
   esac
 }
 
@@ -46,15 +54,17 @@ emoji_for_repo() {
 # if the loop fed them via stdin they would consume it and truncate the loop after the
 # first space. The pane list is fetched once per poll and reused for all spaces.
 poll_once() {
-  local panes wsid label base cwd emoji new
+  local panes wsid label base cwd new
   panes="$("$HERDR" pane list 2>/dev/null)"
   while IFS=$'\t' read -r wsid label <&9; do
     [ -n "$wsid" ] || continue
     base="$(gci_strip_ci_prefix "$label")"
     cwd="$(printf '%s' "$panes" | jq -r --arg w "$wsid" '(.result.panes // .panes // .)[] | select(.workspace_id==$w) | (.foreground_cwd // .cwd) // empty' | head -1)"
-    if [ -z "$cwd" ]; then emoji=""; else emoji="$(emoji_for_repo "$cwd")"; fi
-    [ "$emoji" = "SKIP" ] && continue
-    if [ -n "$emoji" ]; then new="$emoji $base"; else new="$base"; fi
+    if [ -z "$cwd" ]; then SPACE_EMOJI=""; SPACE_MR=""; else status_for_repo "$cwd"; fi
+    [ "$SPACE_EMOJI" = "SKIP" ] && continue
+    new="$base"
+    [ -n "$SPACE_MR" ] && new="!$SPACE_MR $new"          # "!123 dbt"
+    [ -n "$SPACE_EMOJI" ] && new="$SPACE_EMOJI $new"      # "🟢 !123 dbt"
     [ "$new" = "$label" ] && continue
     if [ -n "$DRYRUN" ]; then
       printf 'would rename %s: %q -> %q\n' "$wsid" "$label" "$new"

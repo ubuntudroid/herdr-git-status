@@ -49,4 +49,14 @@ check "strip-none"    "herdr"             "$(gci_strip_ci_prefix 'herdr')"
 check "strip-nospace" "x"                 "$(gci_strip_ci_prefix '🟡x')"
 check "strip-emoji-in-name" "my 🟢 repo"  "$(gci_strip_ci_prefix 'my 🟢 repo')"
 
+# gci_strip_ci_prefix with the !<iid> merge-request token
+check "strip-emoji-mr"   "dbt"          "$(gci_strip_ci_prefix '🟢 !123 dbt')"
+check "strip-emoji-mr2"  "GQL review"   "$(gci_strip_ci_prefix '🔴 !7 GQL review')"
+check "strip-mr-only"    "standalone"   "$(gci_strip_ci_prefix '!42 standalone')"
+check "strip-mr-notnum"  "!abc foo"     "$(gci_strip_ci_prefix '!abc foo')"
+check "strip-mr-bang"    "!important"   "$(gci_strip_ci_prefix '!important')"
+
+# gci_hyperlink — NO_COLOR/non-tty falls back to plain text (no escape sequences)
+check "hyperlink-plain"  "!123"         "$(gci_hyperlink 'https://gitlab.com/x/-/merge_requests/123' '!123')"
+
 exit $fail

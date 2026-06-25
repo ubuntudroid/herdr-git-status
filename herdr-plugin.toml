@@ -1,6 +1,6 @@
 id = "gitlab-ci-status"
 name = "GitLab CI Status"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.7.0"
 description = "GitLab CI status in herdr: a live colored dot on each space's label, plus an on-demand detail pane."
 platforms = ["linux", "macos"]

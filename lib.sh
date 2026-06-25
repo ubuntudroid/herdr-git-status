@@ -95,15 +95,35 @@ gci_status_emoji() {
   esac
 }
 
-# Remove a leading CI status emoji (and one optional following space) from a label.
-# Byte-safe (prefix removal), so it is idempotent across re-applies and user renames.
+# Remove the CI decoration the poller prepends to a label: a leading status emoji
+# (with optional following space) and then an optional "!<digits> " merge-request
+# token. Byte-safe (prefix removal), so it stays idempotent across re-applies and
+# user renames. Both parts are optional and stripped independently.
 gci_strip_ci_prefix() {
-  local l="$1" e
+  local rest="$1" e body num after
   for e in '🟢' '🟡' '🔴' '⚪'; do
-    if [ "${l#"$e" }" != "$l" ]; then printf '%s' "${l#"$e" }"; return; fi
-    if [ "${l#"$e"}"  != "$l" ]; then printf '%s' "${l#"$e"}";  return; fi
+    if [ "${rest#"$e" }" != "$rest" ]; then rest="${rest#"$e" }"; break; fi
+    if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
   done
-  printf '%s' "$l"
+  case "$rest" in
+    '!'[0-9]*)
+      body="${rest#\!}"                 # "123 dbt" or "123"
+      num="${body%%[![:digit:]]*}"      # leading run of digits: "123"
+      after="${body#"$num"}"            # " dbt" or ""
+      case "$after" in ' '*) rest="${after# }" ;; esac
+      ;;
+  esac
+  printf '%s' "$rest"
+}
+
+# Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
+# terminals). Falls back to plain <text> when colors are disabled (NO_COLOR / not a
+# tty), so output stays deterministic in tests and pipes.
+gci_hyperlink() {
+  local url="$1" text="$2"
+  if [ -z "$GCI_RESET" ]; then printf '%s' "$text"; return; fi
+  # BEL-terminated OSC 8 (more widely supported than the ESC-backslash ST form).
+  printf '\033]8;;%s\a%s\033]8;;\a' "$url" "$text"
 }
 
 # Resolve a repo's latest pipeline for its current branch. Returns everything via
@@ -124,5 +144,21 @@ gci_latest_pipeline() {
   enc="$(gci_urlencode_path "$GCI_PATH")"
   resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
   GCI_PIPE="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
+  return 0
+}
+
+# Look up the open merge request whose source branch is <branch>. Sets globals
+# (NOT stdout): GCI_MR_IID and GCI_MR_URL — both "" when there is none or on error.
+# <path>/<branch> come from a prior gci_latest_pipeline call; <repo> supplies glab's
+# host + auth context. Return: 0 found | 1 missing args | 2 api-error | 3 no open MR.
+gci_open_mr() {
+  local repo="$1" path="$2" branch="$3" enc resp
+  GCI_MR_IID=""; GCI_MR_URL=""
+  [ -n "$path" ] && [ -n "$branch" ] || return 1
+  enc="$(gci_urlencode_path "$path")"
+  resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" || return 2
+  GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
+  GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; return 3; }
   return 0
 }

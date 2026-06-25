@@ -3,9 +3,11 @@
 Surfaces GitLab CI status inside herdr two ways:
 
 1. **Live status dots in the spaces sidebar** — a background poller prefixes each space's label with a
-   colored dot for its current branch's pipeline (🟢 passed · 🟡 running · 🔴 failed · ⚪ none). It only
-   edits the label text and never touches the agent status dot.
-2. **An on-demand detail pane** — project link, current branch, and the latest pipeline status + link.
+   colored dot for its current branch's pipeline (🟢 passed · 🟡 running · 🔴 failed · ⚪ none), plus the
+   open merge-request number (`!123`) when the branch has one. It only edits the label text and never
+   touches the agent status dot.
+2. **An on-demand detail pane** — project link, current branch, the latest pipeline status + link, and
+   the open merge request. The `!123` is a clickable hyperlink to the MR (Ctrl/Cmd-click).
 
 ```
  GitLab CI · gitlab.com/myteam/my-service
@@ -17,9 +19,12 @@ Surfaces GitLab CI status inside herdr two ways:
  Pipeline  #1284913   ✓ passed
            ↗ https://gitlab.com/myteam/my-service/-/pipelines/1284913
  Updated   2m ago
+ MR        !123   ↗ https://gitlab.com/myteam/my-service/-/merge_requests/123
 
  r refresh · q quit · auto-refresh 15s
 ```
+
+In the sidebar, the same space shows as `🟢 !123 my-service`.
 
 ## Requirements
 
@@ -91,14 +96,16 @@ placement, edit `herdr-plugin.toml` and re-link.
 The `open` action reads the workspace's working directory from `HERDR_PLUGIN_CONTEXT_JSON`
 (`focused_pane_cwd`, falling back to `workspace_cwd`) and opens the `ci` pane there. The pane derives
 the GitLab host and project path from `git remote get-url origin`, reads the current branch, and calls
-`glab api "projects/<path>/pipelines?ref=<branch>"` (glab supplies authentication and the host). The
-plugin stores no tokens of its own.
+`glab api "projects/<path>/pipelines?ref=<branch>"` for the pipeline and
+`glab api "projects/<path>/merge_requests?source_branch=<branch>&state=opened"` for the open MR (glab
+supplies authentication and the host). The plugin stores no tokens of its own.
 
 The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actions) loops every
 `GITLAB_CI_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
-pipeline the same way, maps the status to a dot, and `herdr workspace rename`s the space to
-`"<dot> <original label>"`. The original label is recovered each cycle by stripping any existing CI
-dot, so it is idempotent and survives your own renames. `stop` kills the loop and restores all labels.
+pipeline and open MR the same way, maps the status to a dot, and `herdr workspace rename`s the space to
+`"<dot> !<mr> <original label>"`. The original label is recovered each cycle by stripping any existing
+CI dot and MR token, so it is idempotent and survives your own renames. `stop` kills the loop and
+restores all labels.
 
 ## Files
 

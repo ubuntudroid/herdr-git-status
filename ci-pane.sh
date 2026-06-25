@@ -54,6 +54,13 @@ build_frame() {
     [ -n "$web" ] && printf '            %s↗ %s%s\n' "$GCI_GRAY" "$web" "$GCI_RESET"
     [ -n "$rel" ] && printf '  Updated   %s\n' "$rel"
   fi
+
+  # Open merge request for this branch (the !123 is a clickable hyperlink to the MR).
+  if gci_open_mr "$REPO" "$GCI_PATH" "$GCI_BRANCH"; then
+    printf '  MR        %s%s%s   %s↗ %s%s\n' \
+      "$GCI_BOLD" "$(gci_hyperlink "$GCI_MR_URL" "!$GCI_MR_IID")" "$GCI_RESET" \
+      "$GCI_GRAY" "$GCI_MR_URL" "$GCI_RESET"
+  fi
   printf '\n  %sr%s refresh · %sq%s quit · auto-refresh %ss\n' \
     "$GCI_BOLD" "$GCI_RESET" "$GCI_BOLD" "$GCI_RESET" "$INTERVAL"
 }
