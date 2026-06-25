@@ -100,7 +100,7 @@ command = "herdr plugin action invoke gitlab-ci-status.open-mr"
 ```
 
 (`prefix` is `ctrl+b`. You can also trigger the actions any time without a keybinding via
-`herdr plugin action invoke gitlab-ci-status.<toggle|start|stop|open>`.)
+`herdr plugin action invoke gitlab-ci-status.<toggle|start|stop|open|open-mr>`.)
 
 ## Usage
 
@@ -164,7 +164,7 @@ stripping any existing CI dot and `!`/`#` token, so it is idempotent and survive
 
 | File | Purpose |
 |------|---------|
-| `herdr-plugin.toml` | Manifest: actions (`open`/`start`/`stop`/`toggle`), the `ci` pane, and keybindings. |
+| `herdr-plugin.toml` | Manifest: actions (`open`/`open-mr`/`start`/`stop`/`toggle`), the `ci` and `mr` panes, and keybindings. |
 | `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`status`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
 | `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
