@@ -367,6 +367,38 @@ gci_review_for_mr() {
   return 0
 }
 
+# List MY open MRs across all GitLab projects, classified by review state. Emits TSV rows:
+#   state \t !<iid> \t web_url \t project_short \t updated_at
+# <repo> supplies glab auth/host context (defaults to $PWD). No-op (prints nothing) if glab
+# is missing or the current user can't be resolved.
+gci_my_mrs_gitlab() {
+  local repo="${1:-$PWD}" me resp pid iid url upd proj
+  command -v glab >/dev/null 2>&1 || return 0
+  me="$(cd "$repo" && glab api user 2>/dev/null | jq -r '.username // empty')"
+  [ -n "$me" ] || return 0
+  resp="$(cd "$repo" && glab api "merge_requests?author_username=$me&state=opened&scope=all&per_page=50" 2>/dev/null)" || return 0
+  while IFS=$'\t' read -r pid iid url upd; do
+    [ -n "$iid" ] || continue
+    gci_review_for_mr "$repo" "$pid" "$iid" "gitlab"
+    proj="${url#https://}"; proj="${proj#*/}"; proj="${proj%%/-/*}"; proj="${proj##*/}"
+    printf '%s\t!%s\t%s\t%s\t%s\n' "$GCI_REVIEW" "$iid" "$url" "$proj" "$upd"
+  done < <(printf '%s' "$resp" | jq -r '.[] | [(.project_id|tostring), (.iid|tostring), .web_url, (.updated_at // .created_at)] | @tsv' 2>/dev/null)
+}
+
+# List MY open PRs across all GitHub repos, classified by review state. Emits TSV rows:
+#   state \t #<num> \t html_url \t repo_name \t updated_at
+# <repo> supplies gh auth/host context (defaults to $PWD). No-op if gh is missing.
+gci_my_mrs_github() {
+  local repo="${1:-$PWD}" resp owner name num url upd
+  command -v gh >/dev/null 2>&1 || return 0
+  resp="$(cd "$repo" && gh search prs --author=@me --state=open --limit 50 --json number,url,repository,updatedAt 2>/dev/null)" || return 0
+  while IFS=$'\t' read -r owner name num url upd; do
+    [ -n "$num" ] || continue
+    gci_review_for_mr "$repo" "$owner/$name" "$num" "github"
+    printf '%s\t#%s\t%s\t%s\t%s\n' "$GCI_REVIEW" "$num" "$url" "$name" "$upd"
+  done < <(printf '%s' "$resp" | jq -r '.[] | [(.repository.nameWithOwner|split("/")[0]), (.repository.nameWithOwner|split("/")[1]), (.number|tostring), .url, .updatedAt] | @tsv' 2>/dev/null)
+}
+
 # Stream recent FAILED pipelines/runs for <branch> (newest first), up to <limit> lines of
 #   <id>\t<web_url>\t<updated_at>
 # Args: repo path branch provider [limit]. <repo> supplies the CLI's host + auth context.
