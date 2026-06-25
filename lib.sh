@@ -66,6 +66,21 @@ gci_provider() {
   esac
 }
 
+# Provider-aware label for the detail pane's herdr border (overrides the plugin-id
+# fallback "gitlab-ci-status"). Derived cheaply from origin — no API call — so it is
+# safe to set at pane startup: "GitLab CI", "GitHub CI", or plain "CI" otherwise.
+gci_pane_title() {
+  local repo="$1" url parsed host
+  url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || { printf 'CI'; return; }
+  parsed="$(gci_parse_remote "$url" 2>/dev/null)" || { printf 'CI'; return; }
+  host="${parsed%%$'\t'*}"
+  case "$(gci_provider "$host")" in
+    gitlab) printf 'GitLab CI' ;;
+    github) printf 'GitHub CI' ;;
+    *)      printf 'CI' ;;
+  esac
+}
+
 gci_status_glyph() {
   case "$1" in
     success)  printf '%s' "${GCI_GREEN}✓ passed${GCI_RESET}" ;;
@@ -232,4 +247,22 @@ gci_open_pr() {
   fi
   [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; return 3; }
   return 0
+}
+
+# Stream recent FAILED pipelines/runs for <branch> (newest first), up to <limit> lines of
+#   <id>\t<web_url>\t<updated_at>
+# Args: repo path branch provider [limit]. <repo> supplies the CLI's host + auth context.
+# Empty output = no failures, or a transient API/CLI error (treated as "none" — hard errors
+# are already surfaced by gci_latest_ci, which build_frame checks before calling this).
+gci_failed_ci() {
+  local repo="$1" path="$2" branch="$3" provider="$4" limit="${5:-5}" enc
+  [ -n "$path" ] && [ -n "$branch" ] || return 0
+  if [ "$provider" = "gitlab" ]; then
+    enc="$(gci_urlencode_path "$path")"
+    (cd "$repo" && glab api "projects/$enc/pipelines?ref=$branch&status=failed&per_page=$limit" 2>/dev/null) \
+      | jq -r '.[] | "\(.id)\t\(.web_url)\t\(.updated_at // .created_at)"' 2>/dev/null
+  elif [ "$provider" = "github" ]; then
+    (cd "$repo" && gh api "repos/$path/actions/runs?branch=$branch&status=failure&per_page=$limit" 2>/dev/null) \
+      | jq -r '.workflow_runs[] | "\(.id)\t\(.html_url)\t\(.updated_at // .created_at)"' 2>/dev/null
+  fi
 }

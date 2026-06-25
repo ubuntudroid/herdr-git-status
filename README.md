@@ -8,20 +8,24 @@ ways:
    colored dot for its current branch's latest CI run (🟢 passed · 🟡 running · 🔴 failed · ⚪ none), plus
    the open request number (`!123` for a GitLab MR, `#123` for a GitHub PR) when the branch has one. It
    only edits the label text and never touches the agent status dot.
-2. **An on-demand detail pane** — project link, current branch, the latest pipeline/run status + link,
-   and the open MR/PR. The `!123`/`#123` is a clickable hyperlink (Ctrl/Cmd-click).
+2. **An on-demand detail pane** — project, current branch, the latest pipeline/run status,
+   the open MR/PR, and a list of the most recent **failed** pipelines/runs for the branch
+   (up to 5). The project path, each run/pipeline `#id`, and the `!123`/`#123` are clickable
+   OSC 8 hyperlinks (Ctrl/Cmd-click) — the raw URLs aren't printed.
 
 ```
  GitLab CI · gitlab.com/myteam/my-service
 
- Project   myteam/my-service
-           ↗ https://gitlab.com/myteam/my-service
+ Project   myteam/my-service          ← links to the project page
  Branch    feature/checkout-flow
 
- Pipeline  #1284913   ✓ passed
-           ↗ https://gitlab.com/myteam/my-service/-/pipelines/1284913
+ Pipeline  #1284913   ✓ passed        ← #id links to the pipeline
  Updated   2m ago
- MR        !123   ↗ https://gitlab.com/myteam/my-service/-/merge_requests/123
+ MR        !123                       ← links to the merge request
+
+ Recent failures
+   #1284901   ✗ 2h ago                ← each #id links to that pipeline
+   #1284866   ✗ 5h ago
 
  r refresh · q quit · auto-refresh 15s
 ```
@@ -31,14 +35,16 @@ ways:
 ```
  GitHub CI · github.com/acme/web-app
 
- Project   acme/web-app
-           ↗ https://github.com/acme/web-app
+ Project   acme/web-app               ← links to the repo
  Branch    feature/checkout-flow
 
- Run       #28165711782   ✓ passed
-           ↗ https://github.com/acme/web-app/actions/runs/28165711782
+ Run       #28165711782   ✓ passed    ← #id links to the Actions run
  Updated   2m ago
- PR        #123   ↗ https://github.com/acme/web-app/pull/123
+ PR        #123                       ← links to the pull request
+
+ Recent failures
+   #28165700001   ✗ 3h ago            ← each #id links to that run
+   #28165611120   ✗ 1d ago
 
  r refresh · q quit · auto-refresh 15s
 ```
@@ -120,9 +126,11 @@ The `open` action reads the workspace's working directory from `HERDR_PLUGIN_CON
 `origin` remote, picks a provider from the host (`*gitlab*` → glab, `*github*` → gh), reads the current
 branch, and queries that provider for the latest CI run and the open MR/PR:
 
-- **GitLab:** `glab api "projects/<path>/pipelines?ref=<branch>"` and
+- **GitLab:** `glab api "projects/<path>/pipelines?ref=<branch>"` (latest + a second call
+  with `&status=failed` for the recent-failures list) and
   `glab api "projects/<path>/merge_requests?source_branch=<branch>&state=opened"`.
-- **GitHub:** `gh api "repos/<owner>/<repo>/actions/runs?branch=<branch>"` and
+- **GitHub:** `gh api "repos/<owner>/<repo>/actions/runs?branch=<branch>"` (latest + a second
+  call with `&status=failure` for the recent-failures list) and
   `gh api "repos/<owner>/<repo>/pulls?head=<owner>:<branch>&state=open"`.
 
 glab/gh supply authentication and the host; the plugin stores no tokens of its own.
@@ -142,5 +150,5 @@ stripping any existing CI dot and `!`/`#` token, so it is idempotent and survive
 | `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`status`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
 | `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
-| `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, status glyph/emoji, relative time, hyperlink, env loader. |
+| `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader. |
 | `test.sh` | Unit tests for `lib.sh`. Run with `bash test.sh`. |

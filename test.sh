@@ -81,4 +81,16 @@ check "strip-emoji-pr"  "web app"  "$(gci_strip_ci_prefix '🟢 #42 web app')"
 check "strip-pr-only"   "api"      "$(gci_strip_ci_prefix '#7 api')"
 check "strip-pr-notnum" "#tag x"   "$(gci_strip_ci_prefix '#tag x')"
 
+# gci_pane_title — provider-aware herdr pane label, derived from origin (no API call)
+ptdir="$(mktemp -d)"
+git -C "$ptdir" init -q 2>/dev/null
+git -C "$ptdir" remote add origin 'git@github.com:acme/web-app.git' 2>/dev/null
+check "title-github" "GitHub CI" "$(gci_pane_title "$ptdir")"
+git -C "$ptdir" remote set-url origin 'https://gitlab.com/myteam/dbt.git' 2>/dev/null
+check "title-gitlab" "GitLab CI" "$(gci_pane_title "$ptdir")"
+git -C "$ptdir" remote set-url origin 'https://bitbucket.org/x/y.git' 2>/dev/null
+check "title-other"  "CI"        "$(gci_pane_title "$ptdir")"
+check "title-norepo" "CI"        "$(gci_pane_title "$ptdir/nonexistent")"
+rm -rf "$ptdir"
+
 exit $fail

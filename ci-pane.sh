@@ -37,34 +37,56 @@ build_frame() {
          "$GCI_BOLD" "$l" "$GCI_HOST/$GCI_PATH" "$GCI_RESET" "$GCI_BRANCH" "$GCI_RED" "$GCI_RESET" "$GCI_ERR"; return 1 ;;
   esac
 
-  local ci_word pr_word proj_url rel
+  # The project path, run/pipeline #id, and MR/PR number are OSC 8 hyperlinks (clickable
+  # in a real terminal). We intentionally do NOT print the raw URLs — they read poorly and
+  # the clickable text already carries the link.
+  local ci_word pr_word proj_url rel ci_tok
   if [ "$GCI_PROVIDER" = "github" ]; then ci_word="Run"; pr_word="PR"; else ci_word="Pipeline"; pr_word="MR"; fi
   proj_url="https://$GCI_HOST/$GCI_PATH"
   printf '%s %s · %s%s\n\n' "$GCI_BOLD" "$l" "$GCI_HOST/$GCI_PATH" "$GCI_RESET"
-  printf '  Project   %s\n' "$GCI_PATH"
-  printf '            %s↗ %s%s\n' "$GCI_GRAY" "$proj_url" "$GCI_RESET"
+  printf '  Project   %s\n' "$(gci_hyperlink "$proj_url" "$GCI_PATH")"
   printf '  Branch    %s\n\n' "$GCI_BRANCH"
 
   if [ -z "$GCI_STATUS" ]; then
     printf '  %-8s  %sNone for %s%s\n' "$ci_word" "$GCI_GRAY" "$GCI_BRANCH" "$GCI_RESET"
   else
     [ -n "$GCI_CI_UPDATED" ] && rel="$(gci_relative_time "$GCI_CI_UPDATED")" || rel=""
-    printf '  %-8s  #%s   %s\n' "$ci_word" "${GCI_CI_ID:-?}" "$(gci_status_glyph "$GCI_STATUS")"
-    [ -n "$GCI_CI_URL" ] && printf '            %s↗ %s%s\n' "$GCI_GRAY" "$GCI_CI_URL" "$GCI_RESET"
+    ci_tok="#${GCI_CI_ID:-?}"
+    [ -n "$GCI_CI_URL" ] && ci_tok="$(gci_hyperlink "$GCI_CI_URL" "$ci_tok")"
+    printf '  %-8s  %s   %s\n' "$ci_word" "$ci_tok" "$(gci_status_glyph "$GCI_STATUS")"
     [ -n "$rel" ] && printf '  Updated   %s\n' "$rel"
   fi
 
   # Open MR/PR for this branch (the !123 / #123 is a clickable hyperlink).
   if gci_open_pr "$REPO" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
-    printf '  %-8s  %s%s%s   %s↗ %s%s\n' \
-      "$pr_word" "$GCI_BOLD" "$(gci_hyperlink "$GCI_MR_URL" "$GCI_MR_SIGIL$GCI_MR_IID")" "$GCI_RESET" \
-      "$GCI_GRAY" "$GCI_MR_URL" "$GCI_RESET"
+    printf '  %-8s  %s%s%s\n' \
+      "$pr_word" "$GCI_BOLD" "$(gci_hyperlink "$GCI_MR_URL" "$GCI_MR_SIGIL$GCI_MR_IID")" "$GCI_RESET"
   fi
+
+  # Recent failed pipelines/runs for this branch (newest first, each #id a clickable link).
+  # The current latest run is already shown above, so skip it; fetch one extra so the list
+  # still fills to the cap when the latest happens to be a failure too.
+  local fail_max=5 f_id f_url f_upd shown=0
+  while IFS=$'\t' read -r f_id f_url f_upd; do
+    [ -n "$f_id" ] && [ "$f_id" != "$GCI_CI_ID" ] || continue
+    [ "$shown" -eq 0 ] && printf '\n  %sRecent failures%s\n' "$GCI_BOLD" "$GCI_RESET"
+    printf '    %s   %s✗%s %s\n' \
+      "$(gci_hyperlink "$f_url" "#$f_id")" "$GCI_RED" "$GCI_RESET" "$(gci_relative_time "$f_upd")"
+    shown=$((shown + 1))
+    [ "$shown" -ge "$fail_max" ] && break
+  done < <(gci_failed_ci "$REPO" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER" $((fail_max + 1)))
+
   printf '\n  %sr%s refresh · %sq%s quit · auto-refresh %ss\n' \
     "$GCI_BOLD" "$GCI_RESET" "$GCI_BOLD" "$GCI_RESET" "$INTERVAL"
 }
 
 if [ -n "$ONCE" ]; then build_frame; exit 0; fi
+
+# Name the herdr pane after the detected remote (e.g. "GitHub CI"), overriding herdr's
+# plugin-id fallback ("gitlab-ci-status"). HERDR_PANE_ID is set by herdr for plugin panes.
+if [ -n "${HERDR_PANE_ID:-}" ]; then
+  "${HERDR_BIN_PATH:-herdr}" pane rename "$HERDR_PANE_ID" "$(gci_pane_title "$REPO")" >/dev/null 2>&1 || true
+fi
 
 tput civis 2>/dev/null || true
 while true; do
