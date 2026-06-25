@@ -195,6 +195,23 @@ gci_gitlab_review_state() {
   esac
 }
 
+# GitHub PR -> canonical review state, from a GraphQL pull-request projection. Precedence
+# matches the badge priority (conflict > changes > draft > approved > awaiting).
+# Args: <isDraft: true|false> <mergeable: MERGEABLE|CONFLICTING|UNKNOWN>
+#       <reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|''> <unresolved_threads: int>
+gci_github_review_state() {
+  local draft="$1" mergeable="$2" decision="$3" unresolved="${4:-0}"
+  if [ "$mergeable" = "CONFLICTING" ]; then printf 'conflict'; return; fi
+  if [ "$decision" = "CHANGES_REQUESTED" ] || { [ "${unresolved:-0}" -gt 0 ] 2>/dev/null; }; then
+    printf 'changes'; return
+  fi
+  if [ "$draft" = "true" ]; then printf 'draft'; return; fi
+  if [ "$decision" = "APPROVED" ] && [ "$mergeable" = "MERGEABLE" ]; then
+    printf 'approved'; return
+  fi
+  printf 'awaiting'
+}
+
 # Remove the CI decoration the poller prepends to a label: a leading status emoji
 # (with optional following space) and then an optional "!<digits> " (GitLab MR) or
 # "#<digits> " (GitHub PR) token. Byte-safe (prefix removal), so it stays idempotent

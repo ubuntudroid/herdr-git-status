@@ -127,4 +127,14 @@ check "gl-cimust"     "awaiting" "$(gci_gitlab_review_state ci_must_pass)"
 check "gl-unblocked"  "changes"  "$(gci_gitlab_review_state ci_still_running false)"
 check "gl-blocked-ok" "awaiting" "$(gci_gitlab_review_state ci_still_running true)"
 
+# gci_github_review_state — (isDraft, mergeable, reviewDecision, unresolved) -> canonical
+check "gh-conflict"      "conflict" "$(gci_github_review_state false CONFLICTING APPROVED 0)"
+check "gh-changes-dec"   "changes"  "$(gci_github_review_state false MERGEABLE CHANGES_REQUESTED 0)"
+check "gh-changes-thr"   "changes"  "$(gci_github_review_state false MERGEABLE REVIEW_REQUIRED 2)"
+check "gh-draft"         "draft"    "$(gci_github_review_state true MERGEABLE REVIEW_REQUIRED 0)"
+check "gh-approved"      "approved" "$(gci_github_review_state false MERGEABLE APPROVED 0)"
+check "gh-awaiting"      "awaiting" "$(gci_github_review_state false MERGEABLE REVIEW_REQUIRED 0)"
+check "gh-unknown"       "awaiting" "$(gci_github_review_state false UNKNOWN '' 0)"
+check "gh-conflict-wins" "conflict" "$(gci_github_review_state true CONFLICTING CHANGES_REQUESTED 3)"
+
 exit $fail
