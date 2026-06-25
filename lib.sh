@@ -19,6 +19,18 @@ gci_require_deps() {
   fi
 }
 
+# Load KEY=VALUE lines from <dir>/.env without overriding vars already in the
+# environment (so real env vars win). <dir> defaults to $HERDR_PLUGIN_CONFIG_DIR.
+gci_load_env() {
+  local dir="${1:-${HERDR_PLUGIN_CONFIG_DIR:-}}" f k v
+  [ -n "$dir" ] && [ -f "$dir/.env" ] || return 0
+  f="$dir/.env"
+  while IFS='=' read -r k v; do
+    case "$k" in ''|\#*) continue;; esac
+    [ -z "${!k:-}" ] && export "$k=$v"
+  done < "$f"
+}
+
 # Print "host<TAB>path" (path without trailing .git). Return 1 if not parseable.
 gci_parse_remote() {
   local url="$1" host path rest
@@ -70,4 +82,47 @@ gci_relative_time() {
   elif [ "$diff" -lt 3600 ]; then printf '%dm ago\n' "$(( diff / 60 ))"
   elif [ "$diff" -lt 86400 ];then printf '%dh ago\n' "$(( diff / 3600 ))"
   else printf '%dd ago\n' "$(( diff / 86400 ))"; fi
+}
+
+# CI status -> a single colored-dot emoji (for the spaces sidebar label).
+gci_status_emoji() {
+  case "$1" in
+    success)  printf '🟢' ;;
+    failed)   printf '🔴' ;;
+    running|pending|created|preparing|waiting_for_resource|scheduled)
+              printf '🟡' ;;
+    *)        printf '⚪' ;;
+  esac
+}
+
+# Remove a leading CI status emoji (and one optional following space) from a label.
+# Byte-safe (prefix removal), so it is idempotent across re-applies and user renames.
+gci_strip_ci_prefix() {
+  local l="$1" e
+  for e in '🟢' '🟡' '🔴' '⚪'; do
+    if [ "${l#"$e" }" != "$l" ]; then printf '%s' "${l#"$e" }"; return; fi
+    if [ "${l#"$e"}"  != "$l" ]; then printf '%s' "${l#"$e"}";  return; fi
+  done
+  printf '%s' "$l"
+}
+
+# Resolve a repo's latest pipeline for its current branch. Returns everything via
+# globals (NOT stdout) so it can be called without a subshell:
+#   GCI_HOST, GCI_PATH, GCI_BRANCH, GCI_ERR (on error),
+#   GCI_PIPE = latest pipeline JSON object (compact), or "" when the branch has none.
+# Return codes:
+#   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable | 4 not-gitlab | 5 api-error
+gci_latest_pipeline() {
+  local repo="$1" url parsed enc resp
+  GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_ERR=""; GCI_PIPE=""
+  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 2
+  parsed="$(gci_parse_remote "$url")" || return 3
+  GCI_HOST="${parsed%%$'\t'*}"; GCI_PATH="${parsed#*$'\t'}"
+  case "$GCI_HOST" in *gitlab*) ;; *) return 4 ;; esac
+  GCI_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  enc="$(gci_urlencode_path "$GCI_PATH")"
+  resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
+  GCI_PIPE="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
+  return 0
 }

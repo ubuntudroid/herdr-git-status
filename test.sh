@@ -34,4 +34,19 @@ check "st-unknown"  "weird"     "$(gci_status_glyph weird)"
 ref_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' '2026-06-25T08:32:00' +%s 2>/dev/null || date -u -d '2026-06-25T08:32:00' +%s)"
 check "rel-2m"      "2m ago"    "$(gci_relative_time '2026-06-25T08:30:00.000Z' "$ref_epoch")"
 
+# gci_status_emoji
+check "em-success"  "🟢" "$(gci_status_emoji success)"
+check "em-failed"   "🔴" "$(gci_status_emoji failed)"
+check "em-running"  "🟡" "$(gci_status_emoji running)"
+check "em-pending"  "🟡" "$(gci_status_emoji pending)"
+check "em-other"    "⚪" "$(gci_status_emoji canceled)"
+
+# gci_strip_ci_prefix (idempotent label cleanup)
+check "strip-green"   "dbt"               "$(gci_strip_ci_prefix '🟢 dbt')"
+check "strip-red"     "GQL review"        "$(gci_strip_ci_prefix '🔴 GQL review')"
+check "strip-white"   "bakku-daemon"      "$(gci_strip_ci_prefix '⚪ bakku-daemon')"
+check "strip-none"    "herdr"             "$(gci_strip_ci_prefix 'herdr')"
+check "strip-nospace" "x"                 "$(gci_strip_ci_prefix '🟡x')"
+check "strip-emoji-in-name" "my 🟢 repo"  "$(gci_strip_ci_prefix 'my 🟢 repo')"
+
 exit $fail

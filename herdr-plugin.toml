@@ -1,8 +1,8 @@
 id = "gitlab-ci-status"
 name = "GitLab CI Status"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
-description = "Live GitLab project link and CI pipeline status for the current workspace."
+description = "GitLab CI status in herdr: a live colored dot on each space's label, plus an on-demand detail pane."
 platforms = ["linux", "macos"]
 
 [[actions]]
@@ -11,6 +11,21 @@ title = "Open GitLab CI status"
 contexts = ["workspace"]
 command = ["bash", "open.sh"]
 
+[[actions]]
+id = "start"
+title = "Start GitLab CI status dots"
+command = ["bash", "poller-ctl.sh", "start"]
+
+[[actions]]
+id = "stop"
+title = "Stop GitLab CI status dots"
+command = ["bash", "poller-ctl.sh", "stop"]
+
+[[actions]]
+id = "toggle"
+title = "Toggle GitLab CI status dots"
+command = ["bash", "poller-ctl.sh", "toggle"]
+
 [[panes]]
 id = "ci"
 title = "GitLab CI"
@@ -18,7 +33,13 @@ placement = "split"
 command = ["bash", "ci-pane.sh"]
 
 [[keys.command]]
-key = "prefix+g"
+key = "prefix+alt+g"
+type = "plugin_action"
+command = "gitlab-ci-status.toggle"
+description = "Toggle GitLab CI status dots"
+
+[[keys.command]]
+key = "prefix+alt+c"
 type = "plugin_action"
 command = "gitlab-ci-status.open"
-description = "GitLab CI status"
+description = "GitLab CI status pane"

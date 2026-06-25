@@ -1,10 +1,11 @@
 # GitLab CI Status — herdr plugin
 
-Live GitLab project link and CI pipeline status for the current workspace, shown in a herdr pane.
+Surfaces GitLab CI status inside herdr two ways:
 
-Press a key in any workspace whose repo lives on GitLab and a side pane opens showing the project
-link, the current branch, and the latest CI pipeline's status (colored) with a link to it. The pane
-refreshes itself every few seconds.
+1. **Live status dots in the spaces sidebar** — a background poller prefixes each space's label with a
+   colored dot for its current branch's pipeline (🟢 passed · 🟡 running · 🔴 failed · ⚪ none). It only
+   edits the label text and never touches the agent status dot.
+2. **An on-demand detail pane** — project link, current branch, and the latest pipeline status + link.
 
 ```
  GitLab CI · gitlab.com/myteam/my-service
@@ -40,26 +41,29 @@ herdr plugin list        # confirm "gitlab-ci-status" is registered
 
 ## Usage
 
-In a workspace opened on a GitLab repo, press **`ctrl+b`** then **`g`**. A split pane opens on the right.
+**Sidebar dots:** press **`ctrl+b`** then **`alt+g`** to toggle the poller on/off. While on, every space's
+label gets a colored CI dot, refreshed every 30s. Toggling off (or `herdr plugin action invoke
+gitlab-ci-status.stop`) removes the dots and restores your original labels.
 
-In the pane:
+**Detail pane:** press **`ctrl+b`** then **`alt+c`** in a GitLab workspace to open a split pane showing
+the project link, branch, and latest pipeline. In the pane: **`r`** refresh, **`q`** quit (`Ctrl-C` also
+closes it). The branch is re-read every refresh, so switching branches updates automatically.
 
-- **`r`** — refresh now
-- **`q`** — quit (`Ctrl-C` also closes it)
-
-The current branch is re-read on every refresh, so switching branches updates the pane automatically.
+> **Note on MR pipelines:** status is looked up for the *branch* ref. Projects that run CI only as
+> merge-request pipelines (common in some GitLab setups) show ⚪ on a feature branch until it has a branch
+> pipeline. An MR-pipeline fallback can be added if you want it.
 
 ## Configuration
 
-Optional. Put a `.env` file in the plugin's config dir:
+Optional. Put a `.env` file in the plugin's config dir (honored by both the pane and the poller):
 
 ```sh
-echo "GITLAB_CI_REFRESH=10" >> "$(herdr plugin config-dir gitlab-ci-status)/.env"
+echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env"
 ```
 
-- `GITLAB_CI_REFRESH` — auto-refresh interval in seconds (default `15`).
+- `GITLAB_CI_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
 
-To change the keybinding or pane placement, edit `herdr-plugin.toml` and re-link.
+To change keybindings or pane placement, edit `herdr-plugin.toml` and re-link.
 
 ## How it works
 
@@ -69,12 +73,19 @@ the GitLab host and project path from `git remote get-url origin`, reads the cur
 `glab api "projects/<path>/pipelines?ref=<branch>"` (glab supplies authentication and the host). The
 plugin stores no tokens of its own.
 
+The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actions) loops every
+`GITLAB_CI_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
+pipeline the same way, maps the status to a dot, and `herdr workspace rename`s the space to
+`"<dot> <original label>"`. The original label is recovered each cycle by stripping any existing CI
+dot, so it is idempotent and survives your own renames. `stop` kills the loop and restores all labels.
+
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `herdr-plugin.toml` | Manifest: the `open` action, the `ci` pane, and the `prefix+g` keybinding. |
-| `open.sh` | Resolves the repo dir from workspace context and opens the pane. |
-| `ci-pane.sh` | The live fetch → render → sleep loop (supports `GITLAB_CI_ONCE=1` for one-shot output). |
-| `lib.sh` | Pure helpers: remote parsing, URL-encoding, status glyphs, relative time. |
+| `herdr-plugin.toml` | Manifest: actions (`open`/`start`/`stop`/`toggle`), the `ci` pane, and keybindings. |
+| `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`status`. |
+| `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
+| `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
+| `lib.sh` | Shared helpers: remote parsing, URL-encoding, status glyph/emoji, relative time, pipeline fetch, env loader. |
 | `test.sh` | Unit tests for `lib.sh`. Run with `bash test.sh`. |
