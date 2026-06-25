@@ -143,6 +143,41 @@ gci_github_status() {
   esac
 }
 
+# Canonical review state -> glyph (full vocabulary; used by the My-MRs pane and tests).
+# States: conflict | changes | draft | approved | awaiting | (anything else / "") -> "".
+gci_review_glyph() {
+  case "$1" in
+    conflict) printf '⚠️' ;;
+    changes)  printf '💬' ;;
+    draft)    printf '📝' ;;
+    approved) printf '✅' ;;
+    awaiting) printf '👀' ;;
+    *)        printf '' ;;
+  esac
+}
+
+# Canonical review state -> the glyph SHOWN on a sidebar label under the "attention +
+# ready" policy: only conflict, changes, and approved surface; draft/awaiting/none render
+# as no glyph (plain !123 / #123).
+gci_review_badge_glyph() {
+  case "$1" in
+    conflict) printf '⚠️' ;;
+    changes)  printf '💬' ;;
+    approved) printf '✅' ;;
+    *)        printf '' ;;
+  esac
+}
+
+# Canonical review state -> My-MRs pane section: "ready" (approved & mergeable),
+# "action" (conflict or changes), or "" (not surfaced: draft/awaiting/none).
+gci_mr_section() {
+  case "$1" in
+    approved)         printf 'ready' ;;
+    conflict|changes) printf 'action' ;;
+    *)                printf '' ;;
+  esac
+}
+
 # Remove the CI decoration the poller prepends to a label: a leading status emoji
 # (with optional following space) and then an optional "!<digits> " (GitLab MR) or
 # "#<digits> " (GitHub PR) token. Byte-safe (prefix removal), so it stays idempotent

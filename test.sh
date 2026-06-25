@@ -93,4 +93,28 @@ check "title-other"  "CI"        "$(gci_pane_title "$ptdir")"
 check "title-norepo" "CI"        "$(gci_pane_title "$ptdir/nonexistent")"
 rm -rf "$ptdir"
 
+# gci_review_glyph — full canonical vocabulary -> emoji
+check "rg-conflict" "⚠️" "$(gci_review_glyph conflict)"
+check "rg-changes"  "💬" "$(gci_review_glyph changes)"
+check "rg-draft"    "📝" "$(gci_review_glyph draft)"
+check "rg-approved" "✅" "$(gci_review_glyph approved)"
+check "rg-awaiting" "👀" "$(gci_review_glyph awaiting)"
+check "rg-none"     ""   "$(gci_review_glyph none)"
+check "rg-empty"    ""   "$(gci_review_glyph '')"
+
+# gci_review_badge_glyph — only attention + ready surface on the label
+check "rb-conflict" "⚠️" "$(gci_review_badge_glyph conflict)"
+check "rb-changes"  "💬" "$(gci_review_badge_glyph changes)"
+check "rb-approved" "✅" "$(gci_review_badge_glyph approved)"
+check "rb-draft"    ""   "$(gci_review_badge_glyph draft)"
+check "rb-awaiting" ""   "$(gci_review_badge_glyph awaiting)"
+check "rb-none"     ""   "$(gci_review_badge_glyph none)"
+
+# gci_mr_section — My-MRs pane bucketing
+check "sec-approved" "ready"  "$(gci_mr_section approved)"
+check "sec-conflict" "action" "$(gci_mr_section conflict)"
+check "sec-changes"  "action" "$(gci_mr_section changes)"
+check "sec-draft"    ""       "$(gci_mr_section draft)"
+check "sec-awaiting" ""       "$(gci_mr_section awaiting)"
+
 exit $fail
