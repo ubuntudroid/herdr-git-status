@@ -117,4 +117,14 @@ check "sec-changes"  "action" "$(gci_mr_section changes)"
 check "sec-draft"    ""       "$(gci_mr_section draft)"
 check "sec-awaiting" ""       "$(gci_mr_section awaiting)"
 
+# gci_gitlab_review_state — detailed_merge_status [+ blocking_discussions_resolved] -> canonical
+check "gl-conflict"   "conflict" "$(gci_gitlab_review_state conflict)"
+check "gl-discuss"    "changes"  "$(gci_gitlab_review_state discussions_not_resolved)"
+check "gl-draft"      "draft"    "$(gci_gitlab_review_state draft_status)"
+check "gl-mergeable"  "approved" "$(gci_gitlab_review_state mergeable)"
+check "gl-notapprv"   "awaiting" "$(gci_gitlab_review_state not_approved)"
+check "gl-cimust"     "awaiting" "$(gci_gitlab_review_state ci_must_pass)"
+check "gl-unblocked"  "changes"  "$(gci_gitlab_review_state ci_still_running false)"
+check "gl-blocked-ok" "awaiting" "$(gci_gitlab_review_state ci_still_running true)"
+
 exit $fail

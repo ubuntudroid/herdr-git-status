@@ -178,6 +178,23 @@ gci_mr_section() {
   esac
 }
 
+# GitLab MR -> canonical review state, from `detailed_merge_status` (GitLab 16.0+) with the
+# MR's `blocking_discussions_resolved` flag as a fallback for statuses that don't themselves
+# encode review. Returns: conflict | changes | draft | approved | awaiting.
+# Args: <detailed_merge_status> [blocking_discussions_resolved: true|false]
+gci_gitlab_review_state() {
+  local dms="$1" blocking="${2:-true}"
+  case "$dms" in
+    conflict)                 printf 'conflict' ;;
+    discussions_not_resolved) printf 'changes' ;;
+    draft_status)             printf 'draft' ;;
+    mergeable)                printf 'approved' ;;
+    *)
+      if [ "$blocking" = "false" ]; then printf 'changes'; else printf 'awaiting'; fi
+      ;;
+  esac
+}
+
 # Remove the CI decoration the poller prepends to a label: a leading status emoji
 # (with optional following space) and then an optional "!<digits> " (GitLab MR) or
 # "#<digits> " (GitHub PR) token. Byte-safe (prefix removal), so it stays idempotent
