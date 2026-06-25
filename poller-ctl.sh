@@ -32,7 +32,7 @@ ws_list() {
 #   SPACE_EMOJI  status emoji, "" (unsupported remote), or "SKIP" (transient error)
 #   SPACE_MR     open MR/PR token incl. sigil ("!123" / "#123") or "" (none)
 status_for_repo() {
-  local cwd="$1" rc
+  local cwd="$1" rc glyph
   SPACE_EMOJI=""; SPACE_MR=""
   gci_latest_ci "$cwd"; rc=$?
   case $rc in
@@ -44,7 +44,11 @@ status_for_repo() {
       else
         SPACE_EMOJI="⚪"   # supported remote, but no pipeline/run for this branch
       fi
-      gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER" && SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
+      if gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
+        gci_review_for_mr "$cwd" "$GCI_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
+        glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
+        SPACE_MR="$glyph$GCI_MR_SIGIL$GCI_MR_IID"
+      fi
       ;;
   esac
 }
