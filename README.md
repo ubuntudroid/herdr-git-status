@@ -51,6 +51,12 @@ ways:
 
 In the sidebar, those spaces show as `🟢 !123 my-service` and `🟢 #123 web-app`.
 
+The open MR/PR number is also prefixed with a **review-state glyph** when the merge request
+needs attention or is ready: `💬` changes requested / unresolved threads · `⚠️` merge conflict
+(needs rebase) · `✅` approved & mergeable (ready to merge). Drafts and MRs merely awaiting
+review show the plain `!123` / `#123` with no glyph. So a space might read `🟢 ✅!123 my-service`
+(green pipeline, MR approved) or `🔴 💬!88 billing-api` (red pipeline, changes requested).
+
 ## Requirements
 
 - **herdr** ≥ 0.7
@@ -86,6 +92,11 @@ command = "herdr plugin action invoke gitlab-ci-status.toggle"
 key = "prefix+shift+i"
 type = "shell"
 command = "herdr plugin action invoke gitlab-ci-status.open"
+
+[[keys.command]]
+key = "prefix+r"
+type = "shell"
+command = "herdr plugin action invoke gitlab-ci-status.open-mr"
 ```
 
 (`prefix` is `ctrl+b`. You can also trigger the actions any time without a keybinding via
@@ -101,6 +112,13 @@ gitlab-ci-status.stop`) removes the dots and restores your original labels.
 project link, branch, latest pipeline/run, and open MR/PR. In the pane: **`r`** refresh, **`q`** quit
 (`Ctrl-C` also closes it). The branch is re-read every refresh, so switching branches updates
 automatically.
+
+**My MRs pane:** `ctrl+b` then `r` opens a pane listing **your own** open MRs/PRs across every
+repo, aggregated from each provider you're authenticated with (GitLab via `glab`, GitHub via
+`gh`), in two sections — **Ready to merge** (approved & mergeable) and **Needs action** (changes
+requested / unresolved threads, or merge conflict). Each MR id is a clickable OSC 8 link. In the
+pane: `r` refresh, `q` quit (Ctrl-C also closes), auto-refresh 15s. Always invokable via
+`herdr plugin action invoke gitlab-ci-status.open-mr`.
 
 > **Note on branch vs MR/PR pipelines:** status is looked up for the current *branch* (GitLab pipelines
 > by `ref`, GitHub Actions runs by `branch`). GitLab projects that run CI only as merge-request
@@ -150,5 +168,7 @@ stripping any existing CI dot and `!`/`#` token, so it is idempotent and survive
 | `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`status`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
 | `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
+| `open-mr.sh` | Resolves the repo context and opens the "My MRs" pane. |
+| `mr-pane.sh` | The "My MRs" pane: my open MRs/PRs across providers, grouped ready / needs-action. |
 | `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader. |
 | `test.sh` | Unit tests for `lib.sh`. Run with `bash test.sh`. |
