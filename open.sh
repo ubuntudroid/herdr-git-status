@@ -19,11 +19,14 @@ if [ -z "$repo" ] || [ ! -d "$repo" ]; then
   exit 1
 fi
 
+# NOTE: do NOT pass --cwd "$repo". herdr resolves the relative pane command
+# ("bash ci-pane.sh") against the process cwd; --cwd would move it off the plugin
+# root and bash would fail to find ci-pane.sh (the pane opens then closes instantly).
+# The repo is passed via --env instead, and ci-pane.sh uses `git -C "$REPO"`.
 exec "$herdr_bin" plugin pane open \
   --plugin gitlab-ci-status \
   --entrypoint ci \
   --placement split \
   --direction right \
-  --cwd "$repo" \
   --env "GITLAB_CI_REPO=$repo" \
   --focus
