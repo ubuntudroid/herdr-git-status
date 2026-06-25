@@ -17,10 +17,10 @@ trap cleanup EXIT INT TERM
 # Gather classified rows from every provider we're authenticated with. Each row:
 #   state \t token \t url \t project_short \t updated_at
 gather_rows() {
-  if command -v glab >/dev/null 2>&1 && (cd "$REPO" && glab auth status >/dev/null 2>&1); then
+  if command -v glab >/dev/null 2>&1; then
     gci_my_mrs_gitlab "$REPO"
   fi
-  if command -v gh >/dev/null 2>&1 && (cd "$REPO" && gh auth status >/dev/null 2>&1); then
+  if command -v gh >/dev/null 2>&1; then
     gci_my_mrs_github "$REPO"
   fi
 }
