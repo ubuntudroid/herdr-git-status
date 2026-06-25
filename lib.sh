@@ -222,11 +222,19 @@ gci_strip_ci_prefix() {
     if [ "${rest#"$e" }" != "$rest" ]; then rest="${rest#"$e" }"; break; fi
     if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
   done
+  # Optional review glyph glued to the MR sigil (e.g. "✅!123"). Only stripped when it is
+  # immediately followed by a sigil+digit, so a user label that merely starts with one of
+  # these emoji (e.g. "✅ done") is never clobbered.
+  for e in '⚠️' '💬' '📝' '✅' '👀'; do
+    case "$rest" in
+      "$e"'!'[0-9]*|"$e"'#'[0-9]*) rest="${rest#"$e"}"; break ;;
+    esac
+  done
   case "$rest" in
     '!'[0-9]*|'#'[0-9]*)
-      body="${rest#?}"                  # drop the sigil (! or #): "123 dbt" or "123"
-      num="${body%%[![:digit:]]*}"      # leading run of digits: "123"
-      after="${body#"$num"}"            # " dbt" or ""
+      body="${rest#?}"                  # drop the sigil (! or #)
+      num="${body%%[![:digit:]]*}"      # leading run of digits
+      after="${body#"$num"}"
       case "$after" in ' '*) rest="${after# }" ;; esac
       ;;
   esac

@@ -137,4 +137,15 @@ check "gh-awaiting"      "awaiting" "$(gci_github_review_state false MERGEABLE R
 check "gh-unknown"       "awaiting" "$(gci_github_review_state false UNKNOWN '' 0)"
 check "gh-conflict-wins" "conflict" "$(gci_github_review_state true CONFLICTING CHANGES_REQUESTED 3)"
 
+# gci_strip_ci_prefix with a review glyph on the MR token (review-state badge)
+check "strip-rev-ready"    "inventory"   "$(gci_strip_ci_prefix '🟢 ✅!250 inventory')"
+check "strip-rev-changes"  "billing-api" "$(gci_strip_ci_prefix '🔴 💬!88 billing-api')"
+check "strip-rev-conflict" "payments"    "$(gci_strip_ci_prefix '🔴 ⚠️!300 payments')"
+check "strip-rev-pr"       "web-app"     "$(gci_strip_ci_prefix '🟢 ✅#41 web-app')"
+check "strip-rev-noemoji"  "svc"         "$(gci_strip_ci_prefix '✅!7 svc')"
+# A user label that merely starts with one of the glyphs (no MR sigil) is preserved:
+check "strip-rev-keep"     "✅ done"      "$(gci_strip_ci_prefix '✅ done')"
+# Idempotent: re-stripping an already-clean label is a no-op:
+check "strip-rev-idem"     "inventory"   "$(gci_strip_ci_prefix "$(gci_strip_ci_prefix '🟢 ✅!250 inventory')")"
+
 exit $fail
