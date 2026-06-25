@@ -326,6 +326,47 @@ gci_open_pr() {
   return 0
 }
 
+# Resolve the canonical review state of a single open MR/PR. Network call; dispatches on
+# <provider>. Sets GCI_REVIEW to conflict|changes|draft|approved|awaiting, or "" on any
+# error/missing data (callers fall back to no glyph). <repo> supplies CLI auth/host context.
+# For GitLab, <path> may be a urlencodable project path OR a numeric project id (both work
+# with the projects/:id/merge_requests/:iid endpoint). For GitHub, <path> is "owner/name".
+# Args: repo path iid provider
+gci_review_for_mr() {
+  local repo="$1" path="$2" iid="$3" provider="$4"
+  local enc resp dms blocking draft mergeable decision unresolved owner name
+  GCI_REVIEW=""
+  [ -n "$path" ] && [ -n "$iid" ] || return 0
+  if [ "$provider" = "gitlab" ]; then
+    enc="$(gci_urlencode_path "$path")"
+    resp="$(cd "$repo" && glab api "projects/$enc/merge_requests/$iid" 2>/dev/null)" || return 0
+    dms="$(printf '%s' "$resp" | jq -r '.detailed_merge_status // empty' 2>/dev/null)"
+    [ -n "$dms" ] || return 0
+    blocking="$(printf '%s' "$resp" | jq -r '.blocking_discussions_resolved // true' 2>/dev/null)"
+    GCI_REVIEW="$(gci_gitlab_review_state "$dms" "$blocking")"
+  elif [ "$provider" = "github" ]; then
+    owner="${path%%/*}"; name="${path#*/}"
+    resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -F number="$iid" -f query='
+      query($owner:String!,$name:String!,$number:Int!){
+        repository(owner:$owner,name:$name){
+          pullRequest(number:$number){
+            isDraft
+            mergeable
+            reviewDecision
+            reviewThreads(first:100){ nodes { isResolved } }
+          }
+        }
+      }' 2>/dev/null)" || return 0
+    draft="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.isDraft // empty' 2>/dev/null)"
+    [ -n "$draft" ] || return 0
+    mergeable="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.mergeable // "UNKNOWN"' 2>/dev/null)"
+    decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // ""' 2>/dev/null)"
+    unresolved="$(printf '%s' "$resp" | jq -r '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved==false)] | length' 2>/dev/null)"
+    GCI_REVIEW="$(gci_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}")"
+  fi
+  return 0
+}
+
 # Stream recent FAILED pipelines/runs for <branch> (newest first), up to <limit> lines of
 #   <id>\t<web_url>\t<updated_at>
 # Args: repo path branch provider [limit]. <repo> supplies the CLI's host + auth context.
