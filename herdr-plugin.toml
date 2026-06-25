@@ -1,34 +1,36 @@
+# id stays "gitlab-ci-status" for back-compat (keybindings, config dir, plugin link)
+# even though the plugin now also supports GitHub.
 id = "gitlab-ci-status"
-name = "GitLab CI Status"
-version = "0.3.0"
+name = "GitLab & GitHub CI Status"
+version = "0.4.0"
 min_herdr_version = "0.7.0"
-description = "GitLab CI status in herdr: a live colored dot on each space's label, plus an on-demand detail pane."
+description = "GitLab & GitHub CI status in herdr: a live colored dot (plus MR/PR number) on each space's label, and an on-demand detail pane. Auto-detects the provider from the repo's origin host."
 platforms = ["linux", "macos"]
 
 [[actions]]
 id = "open"
-title = "Open GitLab CI status"
+title = "Open CI status pane"
 contexts = ["workspace"]
 command = ["bash", "open.sh"]
 
 [[actions]]
 id = "start"
-title = "Start GitLab CI status dots"
+title = "Start CI status dots"
 command = ["bash", "poller-ctl.sh", "start"]
 
 [[actions]]
 id = "stop"
-title = "Stop GitLab CI status dots"
+title = "Stop CI status dots"
 command = ["bash", "poller-ctl.sh", "stop"]
 
 [[actions]]
 id = "toggle"
-title = "Toggle GitLab CI status dots"
+title = "Toggle CI status dots"
 command = ["bash", "poller-ctl.sh", "toggle"]
 
 [[panes]]
 id = "ci"
-title = "GitLab CI"
+title = "CI status"
 placement = "split"
 command = ["bash", "ci-pane.sh"]
 

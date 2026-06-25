@@ -59,4 +59,26 @@ check "strip-mr-bang"    "!important"   "$(gci_strip_ci_prefix '!important')"
 # gci_hyperlink — NO_COLOR/non-tty falls back to plain text (no escape sequences)
 check "hyperlink-plain"  "!123"         "$(gci_hyperlink 'https://gitlab.com/x/-/merge_requests/123' '!123')"
 
+# gci_provider — host -> provider
+check "prov-gitlab"  "gitlab" "$(gci_provider gitlab.com)"
+check "prov-github"  "github" "$(gci_provider github.com)"
+check "prov-gh-ent"  "github" "$(gci_provider github.acme.com)"
+check "prov-self-gl" "gitlab" "$(gci_provider gitlab.example.org)"
+check "prov-none"    ""       "$(gci_provider bitbucket.org)"
+
+# gci_github_status — (status, conclusion) -> canonical status
+check "gh-success"   "success"  "$(gci_github_status completed success)"
+check "gh-failure"   "failed"   "$(gci_github_status completed failure)"
+check "gh-timeout"   "failed"   "$(gci_github_status completed timed_out)"
+check "gh-running"   "running"  "$(gci_github_status in_progress '')"
+check "gh-queued"    "pending"  "$(gci_github_status queued '')"
+check "gh-cancelled" "canceled" "$(gci_github_status completed cancelled)"
+check "gh-skipped"   "skipped"  "$(gci_github_status completed skipped)"
+check "gh-neutral"   "manual"   "$(gci_github_status completed neutral)"
+
+# gci_strip_ci_prefix with the #<num> PR token (GitHub)
+check "strip-emoji-pr"  "web app"  "$(gci_strip_ci_prefix '🟢 #42 web app')"
+check "strip-pr-only"   "api"      "$(gci_strip_ci_prefix '#7 api')"
+check "strip-pr-notnum" "#tag x"   "$(gci_strip_ci_prefix '#tag x')"
+
 exit $fail

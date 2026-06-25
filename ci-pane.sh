@@ -23,42 +23,41 @@ render() {
 }
 
 build_frame() {
-  gci_require_deps || { printf '%s\n' "Install glab, jq, git to use this plugin."; return 1; }
+  gci_require_deps || { printf '%s\n' "Install jq and git to use this plugin."; return 1; }
 
-  local pipe rc
-  gci_latest_pipeline "$REPO"; rc=$?; pipe="$GCI_PIPE"
+  local rc l
+  gci_latest_ci "$REPO"; rc=$?
+  l="CI"; [ "$GCI_PROVIDER" = gitlab ] && l="GitLab CI"; [ "$GCI_PROVIDER" = github ] && l="GitHub CI"
   case $rc in
-    1) printf '%s GitLab CI%s\n\n  Not a git repository:\n  %s\n' "$GCI_BOLD" "$GCI_RESET" "$REPO"; return 1 ;;
-    2) printf '%s GitLab CI%s\n\n  No "origin" remote in %s\n' "$GCI_BOLD" "$GCI_RESET" "$REPO"; return 1 ;;
-    3) printf '%s GitLab CI%s\n\n  origin is not a parseable remote.\n' "$GCI_BOLD" "$GCI_RESET"; return 1 ;;
-    4) printf '%s GitLab CI%s\n\n  origin is not a GitLab remote (host: %s)\n' "$GCI_BOLD" "$GCI_RESET" "$GCI_HOST"; return 1 ;;
-    5) printf '%s GitLab CI · %s%s\n\n  Branch    %s\n\n  %sError querying GitLab:%s\n  %s\n' \
-         "$GCI_BOLD" "$GCI_HOST/$GCI_PATH" "$GCI_RESET" "$GCI_BRANCH" "$GCI_RED" "$GCI_RESET" "$GCI_ERR"; return 1 ;;
+    1) printf '%s CI%s\n\n  Not a git repository:\n  %s\n' "$GCI_BOLD" "$GCI_RESET" "$REPO"; return 1 ;;
+    2) printf '%s CI%s\n\n  No "origin" remote in %s\n' "$GCI_BOLD" "$GCI_RESET" "$REPO"; return 1 ;;
+    3) printf '%s CI%s\n\n  origin is not a parseable remote.\n' "$GCI_BOLD" "$GCI_RESET"; return 1 ;;
+    4) printf '%s CI%s\n\n  origin is not a GitLab or GitHub remote (host: %s)\n' "$GCI_BOLD" "$GCI_RESET" "$GCI_HOST"; return 1 ;;
+    5) printf '%s %s · %s%s\n\n  Branch    %s\n\n  %sError querying CI:%s\n  %s\n' \
+         "$GCI_BOLD" "$l" "$GCI_HOST/$GCI_PATH" "$GCI_RESET" "$GCI_BRANCH" "$GCI_RED" "$GCI_RESET" "$GCI_ERR"; return 1 ;;
   esac
 
-  local proj_url status web updated rel
+  local ci_word pr_word proj_url rel
+  if [ "$GCI_PROVIDER" = "github" ]; then ci_word="Run"; pr_word="PR"; else ci_word="Pipeline"; pr_word="MR"; fi
   proj_url="https://$GCI_HOST/$GCI_PATH"
-  printf '%s GitLab CI · %s%s\n\n' "$GCI_BOLD" "$GCI_HOST/$GCI_PATH" "$GCI_RESET"
+  printf '%s %s · %s%s\n\n' "$GCI_BOLD" "$l" "$GCI_HOST/$GCI_PATH" "$GCI_RESET"
   printf '  Project   %s\n' "$GCI_PATH"
   printf '            %s↗ %s%s\n' "$GCI_GRAY" "$proj_url" "$GCI_RESET"
   printf '  Branch    %s\n\n' "$GCI_BRANCH"
 
-  if [ -z "$pipe" ]; then
-    printf '  Pipeline  %sNo pipelines found for %s%s\n' "$GCI_GRAY" "$GCI_BRANCH" "$GCI_RESET"
+  if [ -z "$GCI_STATUS" ]; then
+    printf '  %-8s  %sNone for %s%s\n' "$ci_word" "$GCI_GRAY" "$GCI_BRANCH" "$GCI_RESET"
   else
-    status="$(printf '%s' "$pipe" | jq -r '.status // "unknown"')"
-    web="$(printf '%s' "$pipe" | jq -r '.web_url // empty')"
-    updated="$(printf '%s' "$pipe" | jq -r '.updated_at // empty')"
-    [ -n "$updated" ] && rel="$(gci_relative_time "$updated")" || rel=""
-    printf '  Pipeline  #%s   %s\n' "$(printf '%s' "$pipe" | jq -r '.id // "?"')" "$(gci_status_glyph "$status")"
-    [ -n "$web" ] && printf '            %s↗ %s%s\n' "$GCI_GRAY" "$web" "$GCI_RESET"
+    [ -n "$GCI_CI_UPDATED" ] && rel="$(gci_relative_time "$GCI_CI_UPDATED")" || rel=""
+    printf '  %-8s  #%s   %s\n' "$ci_word" "${GCI_CI_ID:-?}" "$(gci_status_glyph "$GCI_STATUS")"
+    [ -n "$GCI_CI_URL" ] && printf '            %s↗ %s%s\n' "$GCI_GRAY" "$GCI_CI_URL" "$GCI_RESET"
     [ -n "$rel" ] && printf '  Updated   %s\n' "$rel"
   fi
 
-  # Open merge request for this branch (the !123 is a clickable hyperlink to the MR).
-  if gci_open_mr "$REPO" "$GCI_PATH" "$GCI_BRANCH"; then
-    printf '  MR        %s%s%s   %s↗ %s%s\n' \
-      "$GCI_BOLD" "$(gci_hyperlink "$GCI_MR_URL" "!$GCI_MR_IID")" "$GCI_RESET" \
+  # Open MR/PR for this branch (the !123 / #123 is a clickable hyperlink).
+  if gci_open_pr "$REPO" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
+    printf '  %-8s  %s%s%s   %s↗ %s%s\n' \
+      "$pr_word" "$GCI_BOLD" "$(gci_hyperlink "$GCI_MR_URL" "$GCI_MR_SIGIL$GCI_MR_IID")" "$GCI_RESET" \
       "$GCI_GRAY" "$GCI_MR_URL" "$GCI_RESET"
   fi
   printf '\n  %sr%s refresh · %sq%s quit · auto-refresh %ss\n' \

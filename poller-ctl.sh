@@ -27,25 +27,24 @@ ws_list() {
 }
 
 # Resolve a repo's sidebar decoration into globals (NOT stdout) so it can run
-# without a subshell — that lets the MR lookup reuse the path/branch that
-# gci_latest_pipeline just resolved:
-#   SPACE_EMOJI  status emoji, "" (not a GitLab repo), or "SKIP" (transient error)
-#   SPACE_MR     open-MR iid (e.g. 123) or "" (none / not applicable)
+# without a subshell — that lets the MR/PR lookup reuse the path/branch/provider
+# that gci_latest_ci just resolved:
+#   SPACE_EMOJI  status emoji, "" (unsupported remote), or "SKIP" (transient error)
+#   SPACE_MR     open MR/PR token incl. sigil ("!123" / "#123") or "" (none)
 status_for_repo() {
-  local cwd="$1" rc st
+  local cwd="$1" rc
   SPACE_EMOJI=""; SPACE_MR=""
-  gci_latest_pipeline "$cwd"; rc=$?
+  gci_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
     5)       SPACE_EMOJI="SKIP"; return ;;
     0)
-      if [ -n "$GCI_PIPE" ]; then
-        st="$(printf '%s' "$GCI_PIPE" | jq -r '.status // "unknown"')"
-        SPACE_EMOJI="$(gci_status_emoji "$st")"
+      if [ -n "$GCI_STATUS" ]; then
+        SPACE_EMOJI="$(gci_status_emoji "$GCI_STATUS")"
       else
-        SPACE_EMOJI="⚪"   # GitLab repo, but no pipeline for this branch
+        SPACE_EMOJI="⚪"   # supported remote, but no pipeline/run for this branch
       fi
-      gci_open_mr "$cwd" "$GCI_PATH" "$GCI_BRANCH" && SPACE_MR="$GCI_MR_IID"
+      gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER" && SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
       ;;
   esac
 }
@@ -63,8 +62,8 @@ poll_once() {
     if [ -z "$cwd" ]; then SPACE_EMOJI=""; SPACE_MR=""; else status_for_repo "$cwd"; fi
     [ "$SPACE_EMOJI" = "SKIP" ] && continue
     new="$base"
-    [ -n "$SPACE_MR" ] && new="!$SPACE_MR $new"          # "!123 dbt"
-    [ -n "$SPACE_EMOJI" ] && new="$SPACE_EMOJI $new"      # "🟢 !123 dbt"
+    [ -n "$SPACE_MR" ] && new="$SPACE_MR $new"            # "!123 dbt" / "#123 dbt"
+    [ -n "$SPACE_EMOJI" ] && new="$SPACE_EMOJI $new"      # "🟢 #123 dbt"
     [ "$new" = "$label" ] && continue
     if [ -n "$DRYRUN" ]; then
       printf 'would rename %s: %q -> %q\n' "$wsid" "$label" "$new"

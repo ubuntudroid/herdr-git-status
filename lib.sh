@@ -9,9 +9,11 @@ else
   GCI_RESET=''; GCI_GREEN=''; GCI_RED=''; GCI_YELLOW=''; GCI_GRAY=''; GCI_BLUE=''; GCI_BOLD=''
 fi
 
+# Always-required tools. The provider CLI (glab for GitLab, gh for GitHub) is
+# checked per-repo in gci_latest_ci, since only one is needed for a given remote.
 gci_require_deps() {
   local missing=()
-  for bin in glab jq git; do command -v "$bin" >/dev/null 2>&1 || missing+=("$bin"); done
+  for bin in jq git; do command -v "$bin" >/dev/null 2>&1 || missing+=("$bin"); done
   if [ ${#missing[@]} -gt 0 ]; then
     printf 'Missing dependency: %s\n' "${missing[*]}" >&2
     printf 'Install: brew install %s\n' "${missing[*]}" >&2
@@ -55,6 +57,15 @@ gci_parse_remote() {
 
 gci_urlencode_path() { printf '%s\n' "${1//\//%2F}"; }
 
+# Map a remote host to a CI provider: "gitlab", "github", or "" (unsupported).
+gci_provider() {
+  case "$1" in
+    *gitlab*) printf 'gitlab' ;;
+    *github*) printf 'github' ;;
+    *)        printf '' ;;
+  esac
+}
+
 gci_status_glyph() {
   case "$1" in
     success)  printf '%s' "${GCI_GREEN}✓ passed${GCI_RESET}" ;;
@@ -95,10 +106,32 @@ gci_status_emoji() {
   esac
 }
 
+# Normalize a GitHub Actions run (.status, .conclusion) to the canonical status
+# vocabulary used by gci_status_glyph / gci_status_emoji.
+gci_github_status() {
+  # NB: avoid a local named `status` — it is a read-only special var in zsh.
+  local st="$1" cc="$2"
+  if [ "$st" != "completed" ]; then
+    case "$st" in
+      in_progress) printf 'running' ;;
+      *)           printf 'pending' ;;   # queued / waiting / requested / pending
+    esac
+    return
+  fi
+  case "$cc" in
+    success)                           printf 'success' ;;
+    failure|timed_out|startup_failure) printf 'failed' ;;
+    cancelled|canceled)                printf 'canceled' ;;
+    skipped|stale)                     printf 'skipped' ;;
+    action_required|neutral)           printf 'manual' ;;
+    *)                                 printf 'unknown' ;;
+  esac
+}
+
 # Remove the CI decoration the poller prepends to a label: a leading status emoji
-# (with optional following space) and then an optional "!<digits> " merge-request
-# token. Byte-safe (prefix removal), so it stays idempotent across re-applies and
-# user renames. Both parts are optional and stripped independently.
+# (with optional following space) and then an optional "!<digits> " (GitLab MR) or
+# "#<digits> " (GitHub PR) token. Byte-safe (prefix removal), so it stays idempotent
+# across re-applies and user renames. Both parts are optional, stripped independently.
 gci_strip_ci_prefix() {
   local rest="$1" e body num after
   for e in '🟢' '🟡' '🔴' '⚪'; do
@@ -106,8 +139,8 @@ gci_strip_ci_prefix() {
     if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
   done
   case "$rest" in
-    '!'[0-9]*)
-      body="${rest#\!}"                 # "123 dbt" or "123"
+    '!'[0-9]*|'#'[0-9]*)
+      body="${rest#?}"                  # drop the sigil (! or #): "123 dbt" or "123"
       num="${body%%[![:digit:]]*}"      # leading run of digits: "123"
       after="${body#"$num"}"            # " dbt" or ""
       case "$after" in ' '*) rest="${after# }" ;; esac
@@ -126,39 +159,77 @@ gci_hyperlink() {
   printf '\033]8;;%s\a%s\033]8;;\a' "$url" "$text"
 }
 
-# Resolve a repo's latest pipeline for its current branch. Returns everything via
-# globals (NOT stdout) so it can be called without a subshell:
-#   GCI_HOST, GCI_PATH, GCI_BRANCH, GCI_ERR (on error),
-#   GCI_PIPE = latest pipeline JSON object (compact), or "" when the branch has none.
+# Resolve a repo's latest CI state for its current branch, dispatching on the remote
+# provider (GitLab pipelines via glab, GitHub Actions runs via gh). Returns everything
+# via globals (NOT stdout) so it can be called without a subshell:
+#   GCI_HOST, GCI_PATH, GCI_BRANCH, GCI_PROVIDER, GCI_ERR (on error),
+#   GCI_STATUS  canonical status (success/failed/running/pending/canceled/skipped/
+#               manual/unknown), or "" when the branch has no pipeline/run,
+#   GCI_CI_ID, GCI_CI_URL, GCI_CI_UPDATED.
 # Return codes:
-#   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable | 4 not-gitlab | 5 api-error
-gci_latest_pipeline() {
-  local repo="$1" url parsed enc resp
-  GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_ERR=""; GCI_PIPE=""
+#   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable
+#   4 unsupported-host (not GitLab/GitHub) | 5 api-error (incl. missing provider CLI)
+gci_latest_ci() {
+  local repo="$1" url parsed enc resp run st cc
+  GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
+  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 2
   parsed="$(gci_parse_remote "$url")" || return 3
   GCI_HOST="${parsed%%$'\t'*}"; GCI_PATH="${parsed#*$'\t'}"
-  case "$GCI_HOST" in *gitlab*) ;; *) return 4 ;; esac
+  GCI_PROVIDER="$(gci_provider "$GCI_HOST")"
+  [ -n "$GCI_PROVIDER" ] || return 4
   GCI_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  enc="$(gci_urlencode_path "$GCI_PATH")"
-  resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
-  GCI_PIPE="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
+
+  if [ "$GCI_PROVIDER" = "gitlab" ]; then
+    command -v glab >/dev/null 2>&1 || { GCI_ERR="glab not found — install it (brew install glab) and run: glab auth login"; return 5; }
+    enc="$(gci_urlencode_path "$GCI_PATH")"
+    resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
+    run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
+    [ -n "$run" ] || return 0
+    GCI_STATUS="$(printf '%s' "$run" | jq -r '.status // "unknown"')"
+    GCI_CI_ID="$(printf '%s' "$run" | jq -r '.id // empty')"
+    GCI_CI_URL="$(printf '%s' "$run" | jq -r '.web_url // empty')"
+    GCI_CI_UPDATED="$(printf '%s' "$run" | jq -r '.updated_at // empty')"
+  else
+    command -v gh >/dev/null 2>&1 || { GCI_ERR="gh not found — install it (brew install gh) and run: gh auth login"; return 5; }
+    resp="$(cd "$repo" && gh api "repos/$GCI_PATH/actions/runs?branch=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
+    run="$(printf '%s' "$resp" | jq -c '.workflow_runs[0] // empty' 2>/dev/null)"
+    [ -n "$run" ] || return 0
+    st="$(printf '%s' "$run" | jq -r '.status // "unknown"')"
+    cc="$(printf '%s' "$run" | jq -r '.conclusion // empty')"
+    GCI_STATUS="$(gci_github_status "$st" "$cc")"
+    GCI_CI_ID="$(printf '%s' "$run" | jq -r '.id // empty')"
+    GCI_CI_URL="$(printf '%s' "$run" | jq -r '.html_url // empty')"
+    GCI_CI_UPDATED="$(printf '%s' "$run" | jq -r '.updated_at // empty')"
+  fi
   return 0
 }
 
-# Look up the open merge request whose source branch is <branch>. Sets globals
-# (NOT stdout): GCI_MR_IID and GCI_MR_URL — both "" when there is none or on error.
-# <path>/<branch> come from a prior gci_latest_pipeline call; <repo> supplies glab's
-# host + auth context. Return: 0 found | 1 missing args | 2 api-error | 3 no open MR.
-gci_open_mr() {
-  local repo="$1" path="$2" branch="$3" enc resp
-  GCI_MR_IID=""; GCI_MR_URL=""
+# Look up the open MR/PR whose source/head branch is <branch>, dispatching on
+# <provider> ("gitlab"|"github"). Sets globals (NOT stdout): GCI_MR_IID, GCI_MR_URL,
+# and GCI_MR_SIGIL ("!" for GitLab, "#" for GitHub) — all "" on error/none. The args
+# come from a prior gci_latest_ci call; <repo> supplies the CLI's host + auth context.
+# Return: 0 found | 1 missing args | 2 api-error | 3 no open MR/PR.
+gci_open_pr() {
+  local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner
+  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
-  enc="$(gci_urlencode_path "$path")"
-  resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" || return 2
-  GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
-  GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+  if [ "$provider" = "gitlab" ]; then
+    GCI_MR_SIGIL="!"
+    enc="$(gci_urlencode_path "$path")"
+    resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" || return 2
+    GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
+    GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+  elif [ "$provider" = "github" ]; then
+    GCI_MR_SIGIL="#"
+    owner="${path%%/*}"
+    resp="$(cd "$repo" && gh api "repos/$path/pulls?head=$owner:$branch&state=open&per_page=1" 2>/dev/null)" || return 2
+    GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
+    GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+  else
+    return 1
+  fi
   [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; return 3; }
   return 0
 }
