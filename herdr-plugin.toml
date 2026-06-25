@@ -1,0 +1,24 @@
+id = "gitlab-ci-status"
+name = "GitLab CI Status"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Live GitLab project link and CI pipeline status for the current workspace."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "open"
+title = "Open GitLab CI status"
+contexts = ["workspace"]
+command = ["bash", "open.sh"]
+
+[[panes]]
+id = "ci"
+title = "GitLab CI"
+placement = "split"
+command = ["bash", "ci-pane.sh"]
+
+[[keys.command]]
+key = "prefix+g"
+type = "plugin_action"
+command = "gitlab-ci-status.open"
+description = "GitLab CI status"

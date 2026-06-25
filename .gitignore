@@ -1,0 +1,5 @@
+# Local plugin config / secrets (lives in herdr's config dir, never commit)
+.env
+
+# macOS
+.DS_Store
