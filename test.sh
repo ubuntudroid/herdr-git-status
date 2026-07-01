@@ -183,4 +183,17 @@ check "cwd-all-labeled"  "/p/a"        "$(gci_pick_pane_cwd w2 "$panes_alllabele
 # Unknown workspace -> empty:
 check "cwd-none"         ""            "$(gci_pick_pane_cwd wZ "$panes_one")"
 
+# gci_daemon_alive — true only when <pidfile> exists and names a live process. Backs the
+# poller's is_running check and its self-healing `start` (which relaunches when this is false).
+dtmp="$(mktemp)"
+echo $$ > "$dtmp"                                   # our own pid -> alive
+gci_daemon_alive "$dtmp"; check "daemon-alive-self" "0" "$?"
+( exit 0 ) & deadpid=$!; wait "$deadpid" 2>/dev/null # a reaped child -> dead
+echo "$deadpid" > "$dtmp"
+gci_daemon_alive "$dtmp"; check "daemon-dead-pid"  "1" "$?"
+: > "$dtmp"                                          # empty pidfile -> not alive
+gci_daemon_alive "$dtmp"; check "daemon-empty"     "1" "$?"
+rm -f "$dtmp"                                        # missing pidfile -> not alive
+gci_daemon_alive "$dtmp"; check "daemon-nofile"    "1" "$?"
+
 exit $fail

@@ -18,6 +18,7 @@ PIDFILE="$STATE_DIR/poller.pid"
 LOGFILE="$STATE_DIR/poller.log"
 INTERVAL="${GITLAB_CI_REFRESH:-30}"
 DRYRUN="${GITLAB_CI_DRYRUN:-}"
+START_HEAL_SECS="${GITLAB_CI_START_HEAL_SECS:-5}"   # `start` watches this long, relaunching if the daemon dies
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # -> lines "workspace_id<TAB>label"
@@ -93,7 +94,15 @@ restore_labels() {
   done 9< <(ws_list)
 }
 
-is_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; }
+is_running() { gci_daemon_alive "$PIDFILE"; }
+
+# Launch a detached daemon and record its pid. The run-loop takes pidfile ownership, so an
+# older daemon (if any) self-exits on its next tick — this converges to a single poller.
+spawn_daemon() {
+  nohup bash "$DIR/poller-ctl.sh" run >>"$LOGFILE" 2>&1 </dev/null &
+  echo $! > "$PIDFILE"
+  disown 2>/dev/null || true
+}
 
 case "${1:-status}" in
   run)
@@ -107,11 +116,19 @@ case "${1:-status}" in
     done
     ;;
   start)
-    if is_running; then echo "poller already running (pid $(cat "$PIDFILE"))"; exit 0; fi
-    nohup bash "$DIR/poller-ctl.sh" run >>"$LOGFILE" 2>&1 </dev/null &
-    echo $! > "$PIDFILE"
-    disown 2>/dev/null || true
-    echo "poller started (pid $(cat "$PIDFILE")), interval ${INTERVAL}s"
+    # Self-healing: guarantee a live daemon by the time we return. Launch when none is
+    # running, then keep watching for START_HEAL_SECS and relaunch if the daemon vanishes —
+    # e.g. a one-shot `stop` racing this `start` killed it, or it died on startup. Without
+    # this, a rapid stop/start could silently leave the poller stopped. A `stop` genuinely
+    # issued after the window still wins (it removes the pidfile and the daemon self-exits).
+    deadline=$(( SECONDS + START_HEAL_SECS ))
+    while :; do
+      is_running || spawn_daemon
+      [ "$SECONDS" -ge "$deadline" ] && break
+      sleep 1
+    done
+    if is_running; then echo "poller running (pid $(cat "$PIDFILE")), interval ${INTERVAL}s"
+    else echo "poller failed to start" >&2; exit 1; fi
     ;;
   stop)
     if [ -f "$PIDFILE" ]; then

@@ -257,6 +257,16 @@ gci_pick_pane_cwd() {
   ' 2>/dev/null
 }
 
+# True (exit 0) only when <pidfile> exists and names a live process. Backs the poller's
+# is_running check and its self-healing `start`, which relaunches whenever this is false.
+gci_daemon_alive() {
+  local pidfile="$1" pid
+  [ -f "$pidfile" ] || return 1
+  pid="$(cat "$pidfile" 2>/dev/null)"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
 # Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
 # terminals). Falls back to plain <text> when colors are disabled (NO_COLOR / not a
 # tty), so output stays deterministic in tests and pipes.
