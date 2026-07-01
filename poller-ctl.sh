@@ -62,7 +62,9 @@ poll_once() {
   while IFS=$'\t' read -r wsid label <&9; do
     [ -n "$wsid" ] || continue
     base="$(gci_strip_ci_prefix "$label")"
-    cwd="$(printf '%s' "$panes" | jq -r --arg w "$wsid" '(.result.panes // .panes // .)[] | select(.workspace_id==$w) | (.foreground_cwd // .cwd) // empty' | head -1)"
+    # Resolve the space's repo from a real terminal pane, skipping plugin panes (e.g. the
+    # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
+    cwd="$(gci_pick_pane_cwd "$wsid" "$panes")"
     if [ -z "$cwd" ]; then SPACE_EMOJI=""; SPACE_MR=""; else status_for_repo "$cwd"; fi
     [ "$SPACE_EMOJI" = "SKIP" ] && continue
     new="$base"

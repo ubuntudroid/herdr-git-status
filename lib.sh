@@ -241,6 +241,22 @@ gci_strip_ci_prefix() {
   printf '%s' "$rest"
 }
 
+# Choose the cwd that represents a workspace's repo from a `herdr pane list` JSON blob.
+# Prefer the first pane that has NO label: plugin panes (the status bar, this plugin's own
+# CI/MR panes) self-rename to a sentinel label and one often sits first in the layout, so a
+# blind "first pane" pick would resolve the plugin's own dir (which has no upstream remote)
+# instead of the user's repo — silently dropping the CI dot from every space that has a bar.
+# Falls back to the first pane of the workspace when every pane is labeled.
+# Args: <workspace_id> <pane_list_json>. Echoes the cwd (foreground_cwd, else cwd), or nothing.
+gci_pick_pane_cwd() {
+  local wsid="$1" panes_json="$2"
+  printf '%s' "$panes_json" | jq -r --arg w "$wsid" '
+    [ (.result.panes // .panes // .)[] | select(.workspace_id == $w) ] as $ws
+    | ( [ $ws[] | select((.label // "") == "") ] + $ws )
+    | (.[0] | (.foreground_cwd // .cwd)) // empty
+  ' 2>/dev/null
+}
+
 # Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
 # terminals). Falls back to plain <text> when colors are disabled (NO_COLOR / not a
 # tty), so output stays deterministic in tests and pipes.

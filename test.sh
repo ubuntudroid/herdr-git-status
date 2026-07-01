@@ -148,4 +148,39 @@ check "strip-rev-keep"     "✅ done"      "$(gci_strip_ci_prefix '✅ done')"
 # Idempotent: re-stripping an already-clean label is a no-op:
 check "strip-rev-idem"     "inventory"   "$(gci_strip_ci_prefix "$(gci_strip_ci_prefix '🟢 ✅!250 inventory')")"
 
+# gci_pick_pane_cwd — choose a workspace's repo cwd from a `herdr pane list` blob,
+# skipping plugin panes. Plugin panes (the status bar, this plugin's own CI/MR panes)
+# self-rename to a sentinel label and often sit first in the layout; a blind "first
+# pane" pick would resolve the plugin's own dir (no upstream remote) and drop the dot.
+panes_bar='{"result":{"panes":[
+  {"workspace_id":"wB","label":"status-bar","foreground_cwd":"/plug/herdr-status-bar"},
+  {"workspace_id":"wB","foreground_cwd":"/repo/dbt"},
+  {"workspace_id":"wX","foreground_cwd":"/other/repo"}
+]}}'
+# The status-bar pane is first, but the unlabeled content pane wins:
+check "cwd-skip-bar"     "/repo/dbt"   "$(gci_pick_pane_cwd wB "$panes_bar")"
+# A different workspace resolves to its own pane:
+check "cwd-other-ws"     "/other/repo" "$(gci_pick_pane_cwd wX "$panes_bar")"
+# Multiple plugin panes (bar + config) before the content pane are all skipped;
+# .cwd is used when .foreground_cwd is absent:
+panes_multi='{"panes":[
+  {"workspace_id":"wQ","label":"status-bar","foreground_cwd":"/plug/sb"},
+  {"workspace_id":"wQ","label":"status-bar-config","foreground_cwd":"/plug/sb"},
+  {"workspace_id":"wQ","cwd":"/work/herdr"}
+]}'
+check "cwd-skip-multi"   "/work/herdr" "$(gci_pick_pane_cwd wQ "$panes_multi")"
+# A lone unlabeled pane is picked directly:
+panes_one='{"panes":[{"workspace_id":"w1","foreground_cwd":"/only/repo"}]}'
+check "cwd-content-only" "/only/repo"  "$(gci_pick_pane_cwd w1 "$panes_one")"
+# foreground_cwd is preferred over cwd on the same pane:
+panes_fg='{"panes":[{"workspace_id":"w3","foreground_cwd":"/fg","cwd":"/static"}]}'
+check "cwd-prefer-fg"    "/fg"         "$(gci_pick_pane_cwd w3 "$panes_fg")"
+# Degenerate: every pane is labeled -> fall back to the first pane (old behavior):
+panes_alllabeled='{"panes":[
+  {"workspace_id":"w2","label":"status-bar","cwd":"/p/a"},
+  {"workspace_id":"w2","label":"status-bar-config","cwd":"/p/b"}]}'
+check "cwd-all-labeled"  "/p/a"        "$(gci_pick_pane_cwd w2 "$panes_alllabeled")"
+# Unknown workspace -> empty:
+check "cwd-none"         ""            "$(gci_pick_pane_cwd wZ "$panes_one")"
+
 exit $fail
