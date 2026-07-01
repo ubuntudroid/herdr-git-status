@@ -241,20 +241,37 @@ gci_strip_ci_prefix() {
   printf '%s' "$rest"
 }
 
-# Choose the cwd that represents a workspace's repo from a `herdr pane list` JSON blob.
-# Prefer the first pane that has NO label: plugin panes (the status bar, this plugin's own
-# CI/MR panes) self-rename to a sentinel label and one often sits first in the layout, so a
-# blind "first pane" pick would resolve the plugin's own dir (which has no upstream remote)
-# instead of the user's repo — silently dropping the CI dot from every space that has a bar.
-# Falls back to the first pane of the workspace when every pane is labeled.
-# Args: <workspace_id> <pane_list_json>. Echoes the cwd (foreground_cwd, else cwd), or nothing.
-gci_pick_pane_cwd() {
+# Ordered cwds (foreground_cwd, else cwd) of a workspace's panes, one per line, in list order.
+gci_pane_cwds() {
   local wsid="$1" panes_json="$2"
   printf '%s' "$panes_json" | jq -r --arg w "$wsid" '
-    [ (.result.panes // .panes // .)[] | select(.workspace_id == $w) ] as $ws
-    | ( [ $ws[] | select((.label // "") == "") ] + $ws )
-    | (.[0] | (.foreground_cwd // .cwd)) // empty
+    (.result.panes // .panes // .)[] | select(.workspace_id == $w) | (.foreground_cwd // .cwd) // empty
   ' 2>/dev/null
+}
+
+# True (exit 0) when <dir> is a git work tree that has an origin remote — i.e. a real project
+# checkout, as opposed to a remote-less git dir like the status-bar plugin's own repo.
+gci_git_has_origin() {
+  local dir="$1"
+  [ -n "$dir" ] || return 1
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  [ -n "$(git -C "$dir" remote get-url origin 2>/dev/null)" ]
+}
+
+# Choose the cwd that represents a workspace's repo from a `herdr pane list` JSON blob.
+# Prefer the first pane whose cwd is a git repo WITH an origin remote (the real project
+# checkout). This skips panes like the status bar, whose cwd is a remote-less git dir and
+# would otherwise shadow the repo and drop the CI dot from every space that has a bar. Falls
+# back to the first pane of the workspace when none qualifies.
+# Args: <workspace_id> <pane_list_json>. Echoes the cwd, or nothing.
+gci_pick_pane_cwd() {
+  local wsid="$1" panes_json="$2" cwd first=""
+  while IFS= read -r cwd; do
+    [ -n "$cwd" ] || continue
+    [ -n "$first" ] || first="$cwd"
+    if gci_git_has_origin "$cwd"; then printf '%s\n' "$cwd"; return 0; fi
+  done < <(gci_pane_cwds "$wsid" "$panes_json")
+  [ -n "$first" ] && printf '%s\n' "$first"
 }
 
 # True (exit 0) only when <pidfile> exists and names a live process. Backs the poller's
