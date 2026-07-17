@@ -400,7 +400,8 @@ gci_review_for_mr() {
           }
         }
       }' 2>/dev/null)" || return 0
-    draft="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.isDraft // empty' 2>/dev/null)"
+    # NB: `// empty` would erase isDraft:false (jq treats false as falsy); only bail on a missing PR.
+    draft="$(printf '%s' "$resp" | jq -r 'if .data.repository.pullRequest == null then empty else (.data.repository.pullRequest.isDraft|tostring) end' 2>/dev/null)"
     [ -n "$draft" ] || return 0
     mergeable="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.mergeable // "UNKNOWN"' 2>/dev/null)"
     decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // ""' 2>/dev/null)"

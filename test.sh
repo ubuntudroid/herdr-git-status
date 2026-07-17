@@ -200,4 +200,18 @@ gci_daemon_alive "$dtmp"; check "daemon-empty"     "1" "$?"
 rm -f "$dtmp"                                        # missing pidfile -> not alive
 gci_daemon_alive "$dtmp"; check "daemon-nofile"    "1" "$?"
 
+# gci_review_for_mr (github) — isDraft:false must survive extraction (jq `//` treats false
+# as falsy, so `// empty` would erase it and no non-draft PR could ever get a review state).
+gh() { printf '%s' "$GH_STUB"; } # shadows the gh CLI inside gci_review_for_mr
+GH_STUB='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]}}}}}'
+gci_review_for_mr "$PWD" "acme/web-app" 41 github
+check "review-gh-nondraft" "approved" "$GCI_REVIEW"
+GH_STUB='{"data":{"repository":{"pullRequest":{"isDraft":true,"mergeable":"MERGEABLE","reviewDecision":null,"reviewThreads":{"nodes":[]}}}}}'
+gci_review_for_mr "$PWD" "acme/web-app" 41 github
+check "review-gh-draft"    "draft"    "$GCI_REVIEW"
+GH_STUB='{"data":{"repository":{"pullRequest":null}}}'
+gci_review_for_mr "$PWD" "acme/web-app" 41 github
+check "review-gh-missing"  ""         "$GCI_REVIEW"
+unset -f gh
+
 exit $fail
