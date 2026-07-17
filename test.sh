@@ -200,6 +200,17 @@ gci_daemon_alive "$dtmp"; check "daemon-empty"     "1" "$?"
 rm -f "$dtmp"                                        # missing pidfile -> not alive
 gci_daemon_alive "$dtmp"; check "daemon-nofile"    "1" "$?"
 
+# gci_github_checks_status — aggregate a head commit's check runs; the highest-severity
+# run decides the overall status (a repo can have many workflows per push, so sampling a
+# single run — e.g. a skipped "Claude Code" workflow — misreports CI that is green/running).
+# Input lines: status \t conclusion \t id \t url \t updated. Output: winner as canonical \t id \t url \t updated.
+check "chk-running-wins" "running	3	u3	t3" "$(printf 'completed\tskipped\t1\tu1\tt1\ncompleted\tsuccess\t2\tu2\tt2\nin_progress\t\t3\tu3\tt3\n' | gci_github_checks_status)"
+check "chk-failed-wins"  "failed	2	u2	t2"  "$(printf 'in_progress\t\t1\tu1\tt1\ncompleted\tfailure\t2\tu2\tt2\ncompleted\tsuccess\t3\tu3\tt3\n' | gci_github_checks_status)"
+check "chk-success"      "success	2	u2	t2" "$(printf 'completed\tskipped\t1\tu1\tt1\ncompleted\tsuccess\t2\tu2\tt2\n' | gci_github_checks_status)"
+check "chk-queued"       "pending	1	u1	t1" "$(printf 'queued\t\t1\tu1\tt1\ncompleted\tskipped\t2\tu2\tt2\n' | gci_github_checks_status)"
+check "chk-skipped-only" "skipped	1	u1	t1" "$(printf 'completed\tskipped\t1\tu1\tt1\n' | gci_github_checks_status)"
+check "chk-empty"        "" "$(printf '' | gci_github_checks_status)"
+
 # gci_review_for_mr (github) — isDraft:false must survive extraction (jq `//` treats false
 # as falsy, so `// empty` would erase it and no non-draft PR could ever get a review state).
 gh() { printf '%s' "$GH_STUB"; } # shadows the gh CLI inside gci_review_for_mr
