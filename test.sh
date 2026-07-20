@@ -211,6 +211,20 @@ check "chk-queued"       "pending	1	u1	t1" "$(printf 'queued\t\t1\tu1\tt1\ncompl
 check "chk-skipped-only" "skipped	1	u1	t1" "$(printf 'completed\tskipped\t1\tu1\tt1\n' | gci_github_checks_status)"
 check "chk-empty"        "" "$(printf '' | gci_github_checks_status)"
 
+# gci_latest_ci (github) — a branch missing on the remote (deleted on merge, or not pushed
+# yet) makes commits/<ref>/check-runs fail with HTTP 422 "No commit found for SHA". That is
+# "no CI" (rc 0, empty status), NOT a transient api-error (rc 5): rc 5 makes the poller SKIP
+# the workspace forever, freezing a stale label and never applying the merged badge.
+lct="$(mktemp -d)"
+git -C "$lct" init -q
+git -C "$lct" remote add origin git@github.com:acme/web-app.git
+git -C "$lct" -c user.email=t@t -c user.name=t commit --allow-empty -q -m x
+gh() { printf 'gh: No commit found for SHA: gone-branch (HTTP 422)'; return 1; }
+gci_latest_ci "$lct"
+check "ci-deleted-branch-rc"     "0" "$?"
+check "ci-deleted-branch-status" ""  "$GCI_STATUS"
+unset -f gh; rm -rf "$lct"
+
 # gci_review_for_mr (github) — isDraft:false must survive extraction (jq `//` treats false
 # as falsy, so `// empty` would erase it and no non-draft PR could ever get a review state).
 gh() { printf '%s' "$GH_STUB"; } # shadows the gh CLI inside gci_review_for_mr

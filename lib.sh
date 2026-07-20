@@ -358,7 +358,9 @@ gci_latest_ci() {
     enc="$(gci_urlencode_path "$GCI_BRANCH")"
     if ! resp="$(cd "$repo" && gh api "repos/$GCI_PATH/commits/$enc/check-runs?per_page=100" 2>&1)"; then
       # A branch that isn't on the remote (yet, or anymore) simply has no CI to report.
-      case "$resp" in *"HTTP 404"*) return 0 ;; esac
+      # This endpoint answers 422 "No commit found for SHA" for an unresolvable ref (404
+      # only covers a missing repo), and merged branches are typically auto-deleted.
+      case "$resp" in *"HTTP 404"*|*"HTTP 422"*) return 0 ;; esac
       GCI_ERR="$resp"; return 5
     fi
     run="$(printf '%s' "$resp" \
