@@ -271,15 +271,17 @@ gci_strip_ci_prefix() {
     if [ "${rest#"$e" }" != "$rest" ]; then rest="${rest#"$e" }"; break; fi
     if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
   done
-  # Optional review glyph glued to the MR sigil (e.g. "✅!123"). Only stripped when it is
-  # immediately followed by a sigil+digit, so a user label that merely starts with one of
-  # these emoji (e.g. "✅ done") is never clobbered.
+  # Optional review glyph before the MR sigil, either glued ("✅#123") or space-separated
+  # ("✅ #123", how the poller emits it). Only stripped when a sigil+digit follows, so a
+  # user label that merely starts with one of these emoji (e.g. "✅ done") is never clobbered.
+  # The trailing "#123 " token is then removed by the sigil case below in both forms.
   for e in "${GITLAB_CI_ICON_CONFLICT-}" "${GITLAB_CI_ICON_CHANGES-}" "${GITLAB_CI_ICON_DRAFT-}" \
            "${GITLAB_CI_ICON_APPROVED-}" "${GITLAB_CI_ICON_AWAITING-}" "${GITLAB_CI_ICON_MERGED-}" \
            '⚠️' '💬' '📝' '✅' '👀' '🔀'; do
     [ -n "$e" ] || continue
     case "$rest" in
-      "$e"'!'[0-9]*|"$e"'#'[0-9]*) rest="${rest#"$e"}"; break ;;
+      "$e"'!'[0-9]*|"$e"'#'[0-9]*)   rest="${rest#"$e"}";  break ;;
+      "$e"' !'[0-9]*|"$e"' #'[0-9]*) rest="${rest#"$e" }"; break ;;
     esac
   done
   case "$rest" in

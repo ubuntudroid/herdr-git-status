@@ -323,10 +323,16 @@ check "ov-badge-drft" ""  "$(GITLAB_CI_ICON_DRAFT=D gci_review_badge_glyph draft
 check "ov-none-empty" ""  "$(GITLAB_CI_ICON_NONE= gci_status_emoji canceled)"
 
 # Strip round-trip with overrides: label built the way poll_once builds it.
+# The token is built the way status_for_repo builds it: "<badge> <sigil><id>" (space between
+# the review badge and the id, per the space-before-pr-id change). strip must handle the space
+# or the whole "<badge> #12" token accumulates on every poll.
 check "ov-strip-roundtrip" "dbt" "$(
   GITLAB_CI_ICON_OK=✔ GITLAB_CI_ICON_APPROVED=A
-  gci_strip_ci_prefix "$(gci_status_emoji success) $(gci_review_badge_glyph approved)!12 dbt"
+  gci_strip_ci_prefix "$(gci_status_emoji success) $(gci_review_badge_glyph approved) !12 dbt"
 )"
+# Same, GitHub sigil + a default (non-override) badge glyph, and idempotent on a doubled token:
+check "ov-strip-badge-spaced"  "dbt" "$(gci_strip_ci_prefix "$(gci_review_badge_glyph approved) #12 dbt")"
+check "ov-strip-badge-glued"   "dbt" "$(gci_strip_ci_prefix "$(gci_review_badge_glyph approved)#12 dbt")"
 # The default emoji must STILL strip while overrides are active, or labels decorated
 # before an icon-config change accumulate prefixes on the first poll after it:
 check "ov-strip-default"   "dbt" "$(GITLAB_CI_ICON_OK=✔ gci_strip_ci_prefix '🟢 dbt')"
