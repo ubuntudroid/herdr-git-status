@@ -43,7 +43,7 @@ status_for_repo() {
       if [ -n "$GCI_STATUS" ]; then
         SPACE_EMOJI="$(gci_status_emoji "$GCI_STATUS")"
       else
-        SPACE_EMOJI="⚪"   # supported remote, but no pipeline/run for this branch
+        SPACE_EMOJI="$(gci_status_emoji '')"   # supported remote, but no pipeline/run for this branch
       fi
       # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
       # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
