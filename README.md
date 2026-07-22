@@ -59,6 +59,10 @@ addressing feedback returns the PR to awaiting (no glyph) — stale threads and 
 review decision don't keep it at `💬` while the ball is in a reviewer's court. So a space might read `🟢 ✅!123 my-service`
 (green pipeline, MR approved) or `🔴 💬!88 billing-api` (red pipeline, changes requested).
 
+Once the branch's MR/PR is **merged**, the open-request token is replaced by a `🔀` merged badge
+(e.g. `🔀#123` / `🔀!123`) — a positive signal that the branch landed, instead of the token
+silently disappearing when the MR/PR leaves the open state.
+
 ## Requirements
 
 - **herdr** ≥ 0.7

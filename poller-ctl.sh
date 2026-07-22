@@ -45,11 +45,20 @@ status_for_repo() {
       else
         SPACE_EMOJI="⚪"   # supported remote, but no pipeline/run for this branch
       fi
-      if gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
+      # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
+      # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
+      # here (not inside the old `if gci_open_pr`) because a merged PR returns rc 3 by definition,
+      # so gluing it to the open-PR success path would make it unreachable in the case it covers.
+      gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; rc=$?
+      if [ "$rc" -eq 0 ]; then
         gci_review_for_mr "$cwd" "$GCI_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
         glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
         SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
         [ -n "$glyph" ] && SPACE_MR="$glyph $SPACE_MR"   # "✅ #123", plain "#123" with no glyph
+      elif [ "$rc" -eq 3 ] && gci_merged_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
+        glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
+        SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
+        [ -n "$glyph" ] && SPACE_MR="$glyph $SPACE_MR"
       fi
       ;;
   esac
