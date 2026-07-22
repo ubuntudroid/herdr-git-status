@@ -51,7 +51,7 @@ status_for_repo() {
       # so gluing it to the open-PR success path would make it unreachable in the case it covers.
       gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; rc=$?
       if [ "$rc" -eq 0 ]; then
-        gci_review_for_mr "$cwd" "$GCI_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
+        gci_review_for_mr "$cwd" "$GCI_MR_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
         glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
         SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
         [ -n "$glyph" ] && SPACE_MR="$glyph $SPACE_MR"   # "✅ #123", plain "#123" with no glyph

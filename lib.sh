@@ -343,24 +343,42 @@ gci_hyperlink() {
   printf '\033]8;;%s\a%s\033]8;;\a' "$url" "$text"
 }
 
+# Fork checkouts: print the `upstream` remote's path when one exists on the SAME host
+# as origin (so provider and CLI auth context carry over); print nothing otherwise.
+# Pure git-config read — no network. Forks without an `upstream` remote could fall back
+# to the forge API (gh repo view --json parent / GitLab forked_from_project) — YAGNI
+# until such a checkout shows up.
+gci_upstream_path() {
+  local repo="$1" ourl uurl op upp
+  ourl="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 0
+  uurl="$(git -C "$repo" remote get-url upstream 2>/dev/null)" || return 0
+  op="$(gci_parse_remote "$ourl" 2>/dev/null)" || return 0
+  upp="$(gci_parse_remote "$uurl" 2>/dev/null)" || return 0
+  [ "${op%%$'\t'*}" = "${upp%%$'\t'*}" ] || return 0
+  printf '%s\n' "${upp#*$'\t'}"
+}
+
 # Resolve a repo's latest CI state for its current branch, dispatching on the remote
 # provider (GitLab pipelines via glab, GitHub Actions runs via gh). Returns everything
 # via globals (NOT stdout) so it can be called without a subshell:
 #   GCI_HOST, GCI_PATH, GCI_BRANCH, GCI_PROVIDER, GCI_ERR (on error),
 #   GCI_STATUS  canonical status (success/failed/running/pending/canceled/skipped/
 #               manual/unknown), or "" when the branch has no pipeline/run,
-#   GCI_CI_ID, GCI_CI_URL, GCI_CI_UPDATED.
+#   GCI_CI_ID, GCI_CI_URL, GCI_CI_UPDATED,
+#   GCI_CI_PATH the repo slug the run was actually found in — fork→upstream PRs run CI
+#               in the base repo (defaults to GCI_PATH); pass THIS to gci_failed_ci.
 # Return codes:
 #   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable
 #   4 unsupported-host (not GitLab/GitHub) | 5 api-error (incl. missing provider CLI)
 gci_latest_ci() {
-  local repo="$1" url parsed enc resp run
+  local repo="$1" url parsed enc resp run up
   GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
-  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""
+  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 2
   parsed="$(gci_parse_remote "$url")" || return 3
   GCI_HOST="${parsed%%$'\t'*}"; GCI_PATH="${parsed#*$'\t'}"
+  GCI_CI_PATH="$GCI_PATH"
   GCI_PROVIDER="$(gci_provider "$GCI_HOST")"
   [ -n "$GCI_PROVIDER" ] || return 4
   GCI_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
@@ -370,6 +388,14 @@ gci_latest_ci() {
     enc="$(gci_urlencode_path "$GCI_PATH")"
     resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
     run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
+    # Fork→upstream MRs may run their pipelines in the target project; on no-hit, retry
+    # the upstream slug (retry errors are treated as "no pipeline" — origin already answered).
+    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
+      enc="$(gci_urlencode_path "$up")"
+      resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>/dev/null)" \
+        && run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)" \
+        && [ -n "$run" ] && GCI_CI_PATH="$up" || true
+    fi
     [ -n "$run" ] || return 0
     GCI_STATUS="$(printf '%s' "$run" | jq -r '.status // "unknown"')"
     GCI_CI_ID="$(printf '%s' "$run" | jq -r '.id // empty')"
@@ -391,6 +417,15 @@ gci_latest_ci() {
     run="$(printf '%s' "$resp" \
       | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
       | gci_github_checks_status)"
+    # Fork PRs' `pull_request` check runs attach to the head commit in the BASE repo; on
+    # no-hit, retry the upstream slug (retry errors = "no run" — origin already answered).
+    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
+      resp="$(cd "$repo" && gh api "repos/$up/commits/$enc/check-runs?per_page=100" 2>/dev/null)" \
+        && run="$(printf '%s' "$resp" \
+          | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
+          | gci_github_checks_status)" \
+        && [ -n "$run" ] && GCI_CI_PATH="$up" || true
+    fi
     [ -n "$run" ] || return 0
     IFS=$'\t' read -r GCI_STATUS GCI_CI_ID GCI_CI_URL GCI_CI_UPDATED <<<"$run"
   fi
@@ -399,29 +434,48 @@ gci_latest_ci() {
 
 # Look up the open MR/PR whose source/head branch is <branch>, dispatching on
 # <provider> ("gitlab"|"github"). Sets globals (NOT stdout): GCI_MR_IID, GCI_MR_URL,
-# and GCI_MR_SIGIL ("!" for GitLab, "#" for GitHub) — all "" on error/none. The args
-# come from a prior gci_latest_ci call; <repo> supplies the CLI's host + auth context.
+# GCI_MR_SIGIL ("!" for GitLab, "#" for GitHub), and GCI_MR_PATH — the repo slug the
+# MR/PR was actually found in (fork→upstream PRs live in the upstream repo; pass THIS
+# to gci_review_for_mr) — all "" on error/none. The args come from a prior
+# gci_latest_ci call; <repo> supplies the CLI's host + auth context.
 # Return: 0 found | 1 missing args | 2 api-error | 3 no open MR/PR.
 gci_open_pr() {
-  local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner
-  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""
+  local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner up
+  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""; GCI_MR_PATH=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
+  GCI_MR_PATH="$path"
   if [ "$provider" = "gitlab" ]; then
     GCI_MR_SIGIL="!"
     enc="$(gci_urlencode_path "$path")"
     resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" || return 2
     GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
     GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+    # Fork→upstream MRs exist only in the TARGET project; on no-hit, retry the upstream slug.
+    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      enc="$(gci_urlencode_path "$up")"
+      resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" \
+        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
+        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
+        && GCI_MR_PATH="$up" || true
+    fi
   elif [ "$provider" = "github" ]; then
     GCI_MR_SIGIL="#"
     owner="${path%%/*}"
     resp="$(cd "$repo" && gh api "repos/$path/pulls?head=$owner:$branch&state=open&per_page=1" 2>/dev/null)" || return 2
     GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
     GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+    # Fork→upstream PRs exist only in the BASE repo; on no-hit, retry the upstream slug
+    # with the same fork-qualified head filter (<fork_owner>:<branch>).
+    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      resp="$(cd "$repo" && gh api "repos/$up/pulls?head=$owner:$branch&state=open&per_page=1" 2>/dev/null)" \
+        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)" \
+        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)" \
+        && GCI_MR_PATH="$up" || true
+    fi
   else
     return 1
   fi
-  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; return 3; }
+  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_PATH=""; return 3; }
   return 0
 }
 
@@ -432,15 +486,24 @@ gci_open_pr() {
 # OR merged PRs, so merged is gated on `.merged_at != null`; GitLab's state=merged is already
 # merged-only. Return: 0 merged | 1 missing args | 2 api-error | 3 not merged.
 gci_merged_pr() {
-  local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner
-  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""; GCI_REVIEW=""
+  local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner up
+  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""; GCI_MR_PATH=""; GCI_REVIEW=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
+  GCI_MR_PATH="$path"
   if [ "$provider" = "gitlab" ]; then
     GCI_MR_SIGIL="!"
     enc="$(gci_urlencode_path "$path")"
     resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=merged&per_page=1" 2>/dev/null)" || return 2
     GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
     GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+    # Fork→upstream MRs merge in the TARGET project; on no-hit, retry the upstream slug.
+    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      enc="$(gci_urlencode_path "$up")"
+      resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=merged&per_page=1" 2>/dev/null)" \
+        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
+        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
+        && [ -n "$GCI_MR_IID" ] && GCI_MR_PATH="$up" || true
+    fi
   elif [ "$provider" = "github" ]; then
     GCI_MR_SIGIL="#"
     owner="${path%%/*}"
@@ -449,10 +512,20 @@ gci_merged_pr() {
       GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
       GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
     fi
+    # Fork→upstream PRs merge in the BASE repo; on no-hit, retry the upstream slug with the
+    # same fork-qualified head filter (<fork_owner>:<branch>), still gated on .merged_at.
+    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      resp="$(cd "$repo" && gh api "repos/$up/pulls?head=$owner:$branch&state=closed&per_page=1" 2>/dev/null)" || resp=""
+      if [ -n "$(printf '%s' "$resp" | jq -r '.[0].merged_at // empty' 2>/dev/null)" ]; then
+        GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
+        GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+        [ -n "$GCI_MR_IID" ] && GCI_MR_PATH="$up"
+      fi
+    fi
   else
     return 1
   fi
-  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; return 3; }
+  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_PATH=""; return 3; }
   GCI_REVIEW="merged"
   return 0
 }
