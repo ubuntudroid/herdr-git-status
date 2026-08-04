@@ -353,4 +353,30 @@ check "ov-empty-roundtrip" "svc" "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix "$(
 # here it would eat the leading space of the label):
 check "ov-empty-strip"     " x"  "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix ' x')"
 
+# poller-ctl ensure — restart after unexpected death only
+etmp="$(mktemp -d)"
+printf '#!/bin/sh\necho "{\\"result\\":{\\"workspaces\\":[]}}"\n' > "$etmp/herdr"
+chmod +x "$etmp/herdr"
+pctl() { env HERDR_PLUGIN_STATE_DIR="$etmp/state" HERDR_PLUGIN_CONFIG_DIR="$etmp" \
+             HERDR_BIN_PATH="$etmp/herdr" GITLAB_CI_REFRESH=1 GITLAB_CI_START_HEAL_SECS=0 \
+             bash "$DIR/poller-ctl.sh" "$@"; }
+
+pctl ensure >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "ensure-no-pidfile-stays-stopped" "1" "$?"
+
+bash -c 'exit 0' & _dead=$!; wait "$_dead" 2>/dev/null
+mkdir -p "$etmp/state"; echo "$_dead" > "$etmp/state/poller.pid"
+pctl ensure >/dev/null 2>&1
+gci_daemon_alive "$etmp/state/poller.pid" "poller-ctl.sh run"; check "ensure-restarts-dead" "0" "$?"
+
+_before="$(cat "$etmp/state/poller.pid")"
+pctl ensure >/dev/null 2>&1
+check "ensure-noop-when-running" "$_before" "$(cat "$etmp/state/poller.pid")"
+
+pctl stop >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "stop-removes-pidfile" "1" "$?"
+pctl ensure >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "ensure-respects-stop" "1" "$?"
+rm -rf "$etmp"
+
 exit $fail
