@@ -141,7 +141,7 @@ so `ensure` never overrides it.
 Wire `ensure` to your service manager so it fires when the herdr server comes
 up — event-driven, no timers, cannot block sleep:
 
-**macOS (launchd)** — `~/Library/LaunchAgents/dev.<you>.herdr-git-status-ensure.plist`:
+**macOS (launchd)** — `~/Library/LaunchAgents/dev.you.herdr-git-status-ensure.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -150,14 +150,14 @@ up — event-driven, no timers, cannot block sleep:
   <key>Label</key><string>dev.you.herdr-git-status-ensure</string>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec herdr plugin action invoke gitlab-ci-status.ensure || true</string>
+    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec /absolute/path/to/herdr plugin action invoke gitlab-ci-status.ensure || true</string>
   </array>
-  <key>WatchPaths</key><array><string>/Users/YOU/.config/herdr/herdr.sock</string></array>
+  <key>WatchPaths</key><array><string>/Users/you/.config/herdr/herdr.sock</string></array>
   <key>RunAtLoad</key><true/>
 </dict></plist>
 ```
 
-WatchPaths needs an absolute path (launchd expands nothing). Load it with
+WatchPaths and the herdr command path need absolute paths (launchd expands nothing). For the command path, substitute the output of `command -v herdr` so it uses your actual herdr binary, not the minimal PATH. Load it with
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<name>.plist`.
 
 **Linux (systemd user units)**:
@@ -172,10 +172,12 @@ WantedBy=default.target
 # ~/.config/systemd/user/herdr-git-status-ensure.service
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/bin/env herdr plugin action invoke gitlab-ci-status.ensure
 ```
 
 Enable with `systemctl --user enable --now herdr-git-status-ensure.path`.
+The service stays active after the first trigger, ensuring the poller survives herdr restarts during the login session.
 
 If the poller crashes while herdr keeps running, nothing re-fires until the
 next herdr start — restart manually or add a timer if that ever matters.
