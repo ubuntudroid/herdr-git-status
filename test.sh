@@ -270,6 +270,17 @@ gci_daemon_alive "$dtmp"; check "daemon-empty"     "1" "$?"
 rm -f "$dtmp"                                        # missing pidfile -> not alive
 gci_daemon_alive "$dtmp"; check "daemon-nofile"    "1" "$?"
 
+# gci_pid_matches — identity, not just liveness (pid reuse after reboot)
+gci_pid_matches $$ "test.sh";           check "pidmatch-self"     "0" "$?"
+gci_pid_matches $$ "poller-ctl.sh run"; check "pidmatch-mismatch" "1" "$?"
+bash -c 'exit 0' & _dead=$!; wait "$_dead" 2>/dev/null
+gci_pid_matches "$_dead" "test.sh";     check "pidmatch-deadpid"  "1" "$?"
+
+# gci_daemon_alive with pattern arg
+echo $$ > "$dtmp"
+gci_daemon_alive "$dtmp" "test.sh";           check "daemon-alive-pattern"    "0" "$?"
+gci_daemon_alive "$dtmp" "poller-ctl.sh run"; check "daemon-reused-pid"       "1" "$?"
+
 # gci_github_checks_status — aggregate a head commit's check runs; the highest-severity
 # run decides the overall status (a repo can have many workflows per push, so sampling a
 # single run — e.g. a skipped "Claude Code" workflow — misreports CI that is green/running).

@@ -332,14 +332,23 @@ gci_pick_pane_cwd() {
   [ -n "$first" ] && printf '%s\n' "$first"
 }
 
+# gci_pid_matches <pid> <pattern> — true when <pid> is alive AND its command line
+# contains <pattern> (fixed string). Guards every pidfile consumer against pid
+# reuse after a reboot: kill -0 alone cannot tell our daemon from a stranger.
+gci_pid_matches() {
+  ps -p "$1" -o command= 2>/dev/null | grep -qF "$2"
+}
+
 # True (exit 0) only when <pidfile> exists and names a live process. Backs the poller's
 # is_running check and its self-healing `start`, which relaunches whenever this is false.
 gci_daemon_alive() {
-  local pidfile="$1" pid
+  local pidfile="$1" pattern="${2:-}" pid
   [ -f "$pidfile" ] || return 1
   pid="$(cat "$pidfile" 2>/dev/null)"
   [ -n "$pid" ] || return 1
-  kill -0 "$pid" 2>/dev/null
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -z "$pattern" ] && return 0
+  gci_pid_matches "$pid" "$pattern"
 }
 
 # Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
