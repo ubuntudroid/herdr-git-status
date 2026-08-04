@@ -377,6 +377,22 @@ pctl stop >/dev/null 2>&1
 [ -f "$etmp/state/poller.pid" ]; check "stop-removes-pidfile" "1" "$?"
 pctl ensure >/dev/null 2>&1
 [ -f "$etmp/state/poller.pid" ]; check "ensure-respects-stop" "1" "$?"
+
+# ensure-over-foreign-pid: restart daemon over a reused (foreign) pid, never signal it
+sleep 100 & _foreign=$!
+echo "$_foreign" > "$etmp/state/poller.pid"
+pctl ensure >/dev/null 2>&1
+gci_daemon_alive "$etmp/state/poller.pid" "poller-ctl.sh run"; check "ensure-over-foreign-pid-restarted" "0" "$?"
+kill -0 "$_foreign" 2>/dev/null; check "ensure-over-foreign-pid-untouched" "0" "$?"
+pctl stop >/dev/null 2>&1
+
+# stop-ignores-foreign-pid: stop never signals a reused pid, identity guard protects it
+echo "$_foreign" > "$etmp/state/poller.pid"
+pctl stop >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "stop-ignores-foreign-removes-pidfile" "1" "$?"
+kill -0 "$_foreign" 2>/dev/null; check "stop-ignores-foreign-alive" "0" "$?"
+kill "$_foreign" 2>/dev/null
+
 rm -rf "$etmp"
 
 exit $fail
