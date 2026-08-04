@@ -270,6 +270,17 @@ gci_daemon_alive "$dtmp"; check "daemon-empty"     "1" "$?"
 rm -f "$dtmp"                                        # missing pidfile -> not alive
 gci_daemon_alive "$dtmp"; check "daemon-nofile"    "1" "$?"
 
+# gci_pid_matches — identity, not just liveness (pid reuse after reboot)
+gci_pid_matches $$ "test.sh";           check "pidmatch-self"     "0" "$?"
+gci_pid_matches $$ "poller-ctl.sh run"; check "pidmatch-mismatch" "1" "$?"
+bash -c 'exit 0' & _dead=$!; wait "$_dead" 2>/dev/null
+gci_pid_matches "$_dead" "test.sh";     check "pidmatch-deadpid"  "1" "$?"
+
+# gci_daemon_alive with pattern arg
+echo $$ > "$dtmp"
+gci_daemon_alive "$dtmp" "test.sh";           check "daemon-alive-pattern"    "0" "$?"
+gci_daemon_alive "$dtmp" "poller-ctl.sh run"; check "daemon-reused-pid"       "1" "$?"
+
 # gci_github_checks_status — aggregate a head commit's check runs; the highest-severity
 # run decides the overall status (a repo can have many workflows per push, so sampling a
 # single run — e.g. a skipped "Claude Code" workflow — misreports CI that is green/running).
@@ -341,5 +352,47 @@ check "ov-empty-roundtrip" "svc" "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix "$(
 # Empty-override guard: an empty pattern must be skipped by strip ("" matches anything —
 # here it would eat the leading space of the label):
 check "ov-empty-strip"     " x"  "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix ' x')"
+
+# poller-ctl ensure — restart after unexpected death only
+etmp="$(mktemp -d)"
+printf '#!/bin/sh\necho "{\\"result\\":{\\"workspaces\\":[]}}"\n' > "$etmp/herdr"
+chmod +x "$etmp/herdr"
+pctl() { env HERDR_PLUGIN_STATE_DIR="$etmp/state" HERDR_PLUGIN_CONFIG_DIR="$etmp" \
+             HERDR_BIN_PATH="$etmp/herdr" GITLAB_CI_REFRESH=1 GITLAB_CI_START_HEAL_SECS=0 \
+             bash "$DIR/poller-ctl.sh" "$@"; }
+
+pctl ensure >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "ensure-no-pidfile-stays-stopped" "1" "$?"
+
+bash -c 'exit 0' & _dead=$!; wait "$_dead" 2>/dev/null
+mkdir -p "$etmp/state"; echo "$_dead" > "$etmp/state/poller.pid"
+pctl ensure >/dev/null 2>&1
+gci_daemon_alive "$etmp/state/poller.pid" "poller-ctl.sh run"; check "ensure-restarts-dead" "0" "$?"
+
+_before="$(cat "$etmp/state/poller.pid")"
+pctl ensure >/dev/null 2>&1
+check "ensure-noop-when-running" "$_before" "$(cat "$etmp/state/poller.pid")"
+
+pctl stop >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "stop-removes-pidfile" "1" "$?"
+pctl ensure >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "ensure-respects-stop" "1" "$?"
+
+# ensure-over-foreign-pid: restart daemon over a reused (foreign) pid, never signal it
+sleep 100 & _foreign=$!
+echo "$_foreign" > "$etmp/state/poller.pid"
+pctl ensure >/dev/null 2>&1
+gci_daemon_alive "$etmp/state/poller.pid" "poller-ctl.sh run"; check "ensure-over-foreign-pid-restarted" "0" "$?"
+kill -0 "$_foreign" 2>/dev/null; check "ensure-over-foreign-pid-untouched" "0" "$?"
+pctl stop >/dev/null 2>&1
+
+# stop-ignores-foreign-pid: stop never signals a reused pid, identity guard protects it
+echo "$_foreign" > "$etmp/state/poller.pid"
+pctl stop >/dev/null 2>&1
+[ -f "$etmp/state/poller.pid" ]; check "stop-ignores-foreign-removes-pidfile" "1" "$?"
+kill -0 "$_foreign" 2>/dev/null; check "stop-ignores-foreign-alive" "0" "$?"
+kill "$_foreign" 2>/dev/null
+
+rm -rf "$etmp"
 
 exit $fail

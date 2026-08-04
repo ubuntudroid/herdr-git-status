@@ -131,6 +131,57 @@ pane: `r` refresh, `q` quit (Ctrl-C also closes), auto-refresh 15s. Always invok
 > skipped workflow can't mask a green or running push). GitLab projects that run CI only as merge-request
 > pipelines (common in some GitLab setups) show ⚪ on a feature branch until it has a branch pipeline.
 
+## Autostart after reboot
+
+The poller is a detached daemon: it survives herdr restarts but dies with the
+machine. The `ensure` action restarts it only if it died unexpectedly (a
+leftover pidfile with a dead process). A deliberate `stop` removes the pidfile,
+so `ensure` never overrides it.
+
+Wire `ensure` to your service manager so it fires when the herdr server comes
+up — event-driven, no timers, cannot block sleep:
+
+**macOS (launchd)** — `~/Library/LaunchAgents/dev.you.herdr-git-status-ensure.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.you.herdr-git-status-ensure</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec /absolute/path/to/herdr plugin action invoke gitlab-ci-status.ensure || true</string>
+  </array>
+  <key>WatchPaths</key><array><string>/Users/you/.config/herdr/herdr.sock</string></array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+```
+
+WatchPaths and the herdr command path need absolute paths (launchd expands nothing). For the command path, substitute the output of `command -v herdr` so it uses your actual herdr binary, not the minimal PATH. Load it with
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<name>.plist`.
+
+**Linux (systemd user units)**:
+
+```ini
+# ~/.config/systemd/user/herdr-git-status-ensure.path
+[Path]
+PathExists=%h/.config/herdr/herdr.sock
+[Install]
+WantedBy=default.target
+
+# ~/.config/systemd/user/herdr-git-status-ensure.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env herdr plugin action invoke gitlab-ci-status.ensure
+```
+
+Enable with `systemctl --user enable --now herdr-git-status-ensure.path`.
+The service stays active after the first trigger, ensuring the poller survives herdr restarts during the login session.
+
+If the poller crashes while herdr keeps running, nothing re-fires until the
+next herdr start — restart manually or add a timer if that ever matters.
+
 ## Configuration
 
 Optional. Put a `.env` file in the plugin's config dir (honored by both the pane and the poller):
@@ -189,7 +240,7 @@ stripping any existing CI dot and `!`/`#` token, so it is idempotent and survive
 | File | Purpose |
 |------|---------|
 | `herdr-plugin.toml` | Manifest: actions (`open`/`open-mr`/`start`/`stop`/`toggle`), the `ci` and `mr` panes, and keybindings. |
-| `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`status`. |
+| `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`ensure`/`status`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
 | `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
 | `open-mr.sh` | Resolves the repo context and opens the "My MRs" pane. |
