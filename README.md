@@ -280,7 +280,7 @@ because they do not survive copy-paste through every editor — write them with
 #   RUN   nf-oct-dot_fill               U+F444
 
 # Review cell, matching GitHub's merge box and Reviewers list:
-#   CONFLICT  nf-oct-alert                    U+F421
+#   CONFLICT  nf-oct-alert_fill               U+F40C   (filled, matching the dots)
 #   CHANGES   nf-oct-file_diff                U+F4D2
 #   DRAFT     nf-oct-git_pull_request_draft   U+F4DD
 #   APPROVED  nf-oct-check                    U+F42E
@@ -293,10 +293,11 @@ that is how GitHub's own status dots read. What separates the cells is the `CI` 
 what separates the states within a cell is colour. That trade is only sound if your rows actually
 colour the tokens, hence the uncoloured fallback above.
 
-Outline/fill counterparts exist for some of these, if you prefer one weight throughout:
-`check_circle` U+F49E · `x_circle` U+F52F · `dot` U+F4C3 · `alert_fill` U+F40C · `skip_fill` U+F518.
+The set above is filled wherever the octicons offer a filled form: `dot_fill`, `alert_fill`. Outline
+counterparts exist if you prefer the lighter weight — `dot` U+F4C3 · `alert` U+F421 (GitHub's own
+merge-conflict icon is the outline one) · `check_circle` U+F49E · `x_circle` U+F52F · `skip` U+F517.
 There is no fill variant of `file_diff`, `check`, `git_merge`, or `git_pull_request_draft` — the
-octicon set has only 19 `_fill` glyphs in total, so a fully filled set is not achievable.
+octicon set has only 19 `_fill` glyphs in total, so a wholly filled set is not achievable.
 
 **Colours pair with these glyphs in `ui.sidebar.spaces.rows`, not in the plugin.** Following
 GitHub's own status semantics: red for conflict *and* changes-requested (they differ by glyph, as
