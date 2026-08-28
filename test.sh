@@ -103,15 +103,6 @@ check "rg-none"     ""   "$(gci_review_glyph none)"
 check "rg-empty"    ""   "$(gci_review_glyph '')"
 check "rg-merged"   "🔀" "$(gci_review_glyph merged)"
 
-# gci_review_badge_glyph — only attention + ready surface on the label
-check "rb-conflict" "⚠️" "$(gci_review_badge_glyph conflict)"
-check "rb-changes"  "💬" "$(gci_review_badge_glyph changes)"
-check "rb-approved" "✅" "$(gci_review_badge_glyph approved)"
-check "rb-draft"    ""   "$(gci_review_badge_glyph draft)"
-check "rb-awaiting" ""   "$(gci_review_badge_glyph awaiting)"
-check "rb-none"     ""   "$(gci_review_badge_glyph none)"
-check "rb-merged"   "🔀" "$(gci_review_badge_glyph merged)"
-
 # gci_mr_section — My-MRs pane bucketing
 check "sec-approved" "ready"  "$(gci_mr_section approved)"
 check "sec-conflict" "action" "$(gci_mr_section conflict)"
@@ -167,6 +158,23 @@ check "e2e-gh-rerequest" "awaiting" "$GCI_REVIEW"
 GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"CHANGES_REQUESTED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":1},"latestOpinionatedReviews":{"nodes":[{"state":"CHANGES_REQUESTED"}]}}}}}'
 gci_review_for_mr "$DIR" myorg/app 1 github
 check "e2e-gh-standing" "changes" "$GCI_REVIEW"
+
+# Re-request regression. GitHub does NOT drop a re-requested reviewer from
+# latestOpinionatedReviews — verified live on PR Photoroom/content_backend#3397, where
+# `marekzp` sat in latestOpinionatedReviews as CHANGES_REQUESTED *and* in reviewRequests
+# at the same time. Counting every standing verdict pinned such a PR to `changes` forever
+# and hid the re-request; a standing verdict counts only while its author is not pending.
+GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"CHANGES_REQUESTED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":2,"nodes":[{"requestedReviewer":{"login":"pr-machine-user"}},{"requestedReviewer":{"login":"marekzp"}}]},"latestOpinionatedReviews":{"nodes":[{"state":"CHANGES_REQUESTED","author":{"login":"marekzp"}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "e2e-gh-rereq-same-author" "awaiting" "$GCI_REVIEW"
+# Control: a DIFFERENT reviewer is pending, so marekzp's verdict still stands.
+GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"CHANGES_REQUESTED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":1,"nodes":[{"requestedReviewer":{"login":"someone-else"}}]},"latestOpinionatedReviews":{"nodes":[{"state":"CHANGES_REQUESTED","author":{"login":"marekzp"}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "e2e-gh-rereq-other-author" "changes" "$GCI_REVIEW"
+# A team review request has no login; it must not accidentally retire a user's verdict.
+GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"CHANGES_REQUESTED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":1,"nodes":[{"requestedReviewer":{}}]},"latestOpinionatedReviews":{"nodes":[{"state":"CHANGES_REQUESTED","author":{"login":"marekzp"}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "e2e-gh-rereq-team" "changes" "$GCI_REVIEW"
 unset -f gh
 
 # gci_strip_ci_prefix with a review glyph on the MR token (review-state badge)
@@ -328,8 +336,7 @@ check "ov-run"        "R" "$(GITLAB_CI_ICON_RUN=R gci_status_emoji pending)"
 check "ov-none"       "N" "$(GITLAB_CI_ICON_NONE=N gci_status_emoji canceled)"
 check "ov-approved"   "A" "$(GITLAB_CI_ICON_APPROVED=A gci_review_glyph approved)"
 check "ov-draft"      "D" "$(GITLAB_CI_ICON_DRAFT=D gci_review_glyph draft)"
-check "ov-badge"      "C" "$(GITLAB_CI_ICON_CONFLICT=C gci_review_badge_glyph conflict)"
-check "ov-badge-drft" ""  "$(GITLAB_CI_ICON_DRAFT=D gci_review_badge_glyph draft)"
+check "ov-conflict"   "C" "$(GITLAB_CI_ICON_CONFLICT=C gci_review_glyph conflict)"
 # Set-but-EMPTY hides the glyph (e.g. no dot for "no pipeline"):
 check "ov-none-empty" ""  "$(GITLAB_CI_ICON_NONE= gci_status_emoji canceled)"
 
@@ -339,11 +346,11 @@ check "ov-none-empty" ""  "$(GITLAB_CI_ICON_NONE= gci_status_emoji canceled)"
 # or the whole "<badge> #12" token accumulates on every poll.
 check "ov-strip-roundtrip" "dbt" "$(
   GITLAB_CI_ICON_OK=✔ GITLAB_CI_ICON_APPROVED=A
-  gci_strip_ci_prefix "$(gci_status_emoji success) $(gci_review_badge_glyph approved) !12 dbt"
+  gci_strip_ci_prefix "$(gci_status_emoji success) $(gci_review_glyph approved) !12 dbt"
 )"
 # Same, GitHub sigil + a default (non-override) badge glyph, and idempotent on a doubled token:
-check "ov-strip-badge-spaced"  "dbt" "$(gci_strip_ci_prefix "$(gci_review_badge_glyph approved) #12 dbt")"
-check "ov-strip-badge-glued"   "dbt" "$(gci_strip_ci_prefix "$(gci_review_badge_glyph approved)#12 dbt")"
+check "ov-strip-badge-spaced"  "dbt" "$(gci_strip_ci_prefix "$(gci_review_glyph approved) #12 dbt")"
+check "ov-strip-badge-glued"   "dbt" "$(gci_strip_ci_prefix "$(gci_review_glyph approved)#12 dbt")"
 # The default emoji must STILL strip while overrides are active, or labels decorated
 # before an icon-config change accumulate prefixes on the first poll after it:
 check "ov-strip-default"   "dbt" "$(GITLAB_CI_ICON_OK=✔ gci_strip_ci_prefix '🟢 dbt')"
@@ -392,21 +399,32 @@ exit 0
 STUB
 chmod +x "$ttmp/herdr"
 
-# gci_report_tokens — the live bucket carries the value, the other three are sent EMPTY
-# (which clears them), so exactly one CI token exists per space and the user's per-state
-# fg colours it. All of it in ONE call: --seq is per (workspace, source), so a second
-# call in the same second would be dropped.
+# gci_report_tokens — CI and review each publish under the token named for their current
+# state and send every sibling state EMPTY (which clears it), so exactly one of each is
+# live per space and the user's per-state fg can colour it. All in ONE call: --seq is per
+# (workspace, source), so a second call in the same second would be dropped.
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" \
-  gci_report_tokens wX run "CI ~" "OK" "#7" 42 9000
+  gci_report_tokens wX pending changes "#7" 42 9000
 check "report-one-call" "1" "$(wc -l < "$ttmp/log" | tr -d ' ')"
-grep -q -- '--token ci_ok= --token ci_fail= --token ci_run=CI ~ --token ci_none= --token review=OK --token mr=#7 --seq 42 --ttl-ms 9000' "$ttmp/log"
-check "report-only-live-bucket-set" "0" "$?"
+grep -q -- '--token ci_run=CI 🟡' "$ttmp/log";        check "report-ci-live-state"    "0" "$?"
+grep -q -- '--token ci_ok= --token ci_fail= ' "$ttmp/log"; check "report-ci-siblings-cleared" "0" "$?"
+grep -q -- '--token review_changes=💬' "$ttmp/log";   check "report-review-live-state" "0" "$?"
+grep -q -- '--token review_approved= ' "$ttmp/log";   check "report-review-siblings-cleared" "0" "$?"
+grep -q -- '--token mr=#7 --seq 42 --ttl-ms 9000' "$ttmp/log"; check "report-tail" "0" "$?"
+# No CI and no PR at all: every token empty, nothing stale left behind.
+: > "$ttmp/log"
+HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" gci_report_tokens wX "" "" "" 44 9000
+grep -q -- '--token ci_none= --token review_conflict=' "$ttmp/log"
+check "report-empty-state-clears-all" "0" "$?"
 
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" gci_clear_tokens wX 43
-grep -q -- '--clear-token ci_ok --clear-token ci_fail --clear-token ci_run --clear-token ci_none --clear-token review --clear-token mr' "$ttmp/log"
-check "clear-covers-every-token" "0" "$?"
+for _t in ci_ok ci_fail ci_run ci_none review_conflict review_changes review_draft \
+          review_approved review_awaiting review_merged mr; do
+  grep -q -- "--clear-token $_t" "$ttmp/log" || { check "clear-covers-$_t" "0" "1"; }
+done
+check "clear-covers-every-token" "11" "$(grep -o -- '--clear-token' "$ttmp/log" | wc -l | tr -d ' ')"
 
 # poll-once publishes tokens and NEVER renames — the whole point of the migration. The
 # fake workspace carries a label decorated by a pre-token version ("🟢 #12 proj"); the old
@@ -416,7 +434,7 @@ tctl() { env HERDR_PLUGIN_STATE_DIR="$ttmp/state" HERDR_PLUGIN_CONFIG_DIR="$ttmp
              bash "$DIR/poller-ctl.sh" "$@"; }
 
 : > "$ttmp/log"; tctl poll-once >/dev/null 2>&1
-grep -q -- 'report-metadata wT --source gitlab-ci-status --token ci_ok= --token ci_fail= --token ci_run= --token ci_none= --token review= --token mr= --seq' "$ttmp/log"
+grep -q -- 'report-metadata wT --source gitlab-ci-status --token ci_ok= --token ci_fail= --token ci_run= --token ci_none= --token review_conflict= --token review_changes= --token review_draft= --token review_approved= --token review_awaiting= --token review_merged= --token mr= --seq' "$ttmp/log"
 check "poll-reports-all-tokens" "0" "$?"
 check "poll-single-report" "1" "$(grep -c 'report-metadata' "$ttmp/log")"
 grep -q -- '--ttl-ms 90000' "$ttmp/log"
@@ -425,7 +443,7 @@ grep -q 'workspace rename' "$ttmp/log"
 check "poll-never-renames" "1" "$?"
 
 : > "$ttmp/log"; GITLAB_CI_TOKEN_PREFIX=x_ tctl poll-once >/dev/null 2>&1
-grep -q -- '--token x_ci_ok= --token x_ci_fail= --token x_ci_run= --token x_ci_none= --token x_review= --token x_mr=' "$ttmp/log"
+grep -q -- '--token x_ci_ok= .* --token x_review_changes= .* --token x_mr=' "$ttmp/log"
 check "poll-honors-token-prefix" "0" "$?"
 
 # restore — the migration path: clear our tokens AND strip the stale label decoration.

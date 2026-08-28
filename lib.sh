@@ -207,16 +207,6 @@ gci_review_glyph() {
   esac
 }
 
-# Canonical review state -> the glyph SHOWN on a sidebar label under the "attention +
-# ready" policy: only conflict, changes, and approved surface; draft/awaiting/none render
-# as no glyph (plain !123 / #123).
-gci_review_badge_glyph() {
-  case "$1" in
-    conflict|changes|approved|merged) gci_review_glyph "$1" ;;
-    *)                                printf '' ;;
-  esac
-}
-
 # Canonical review state -> My-MRs pane section: "ready" (approved & mergeable),
 # "action" (conflict or changes), or "" (not surfaced: draft/awaiting/none).
 gci_mr_section() {
@@ -260,12 +250,15 @@ gci_gitlab_blocking_resolved() {
 gci_github_review_state() {
   local draft="$1" mergeable="$2" decision="$3" unresolved="${4:-0}" standing="${5:-0}" pending="${6:-0}"
   if [ "$mergeable" = "CONFLICTING" ]; then printf 'conflict'; return; fi
-  # standing = CHANGES_REQUESTED entries in latestOpinionatedReviews; GitHub drops a reviewer
-  # from that list while their review is re-requested, so a standing entry always means
-  # changes. reviewDecision is sticky across a re-request and unresolved threads outlive
-  # pushed fixes, so both count only while no review is pending — a pending request puts the
-  # ball back in a reviewer's court: awaiting, not changes. NB: threads opened while some
-  # reviewer's never-consumed initial request is pending also read as awaiting; the
+  # standing = CHANGES_REQUESTED entries in latestOpinionatedReviews whose author is NOT in
+  # the PR's pending review requests. GitHub does NOT drop a re-requested reviewer from
+  # latestOpinionatedReviews — verified live on a PR where the same login appeared in both
+  # lists at once — so counting every standing entry pinned such a PR to `changes` forever
+  # and made the re-request invisible. Excluding pending authors is what lets a re-request
+  # hand the ball back: that reviewer's old verdict no longer stands.
+  # reviewDecision is sticky across a re-request and unresolved threads outlive pushed
+  # fixes, so both count only while no review is pending at all. NB: threads opened while
+  # some reviewer's never-consumed initial request is pending also read as awaiting; the
   # projection can't tell fresh threads from stale ones without comparing timestamps, and
   # the pending request is the stronger signal.
   if [ "${standing:-0}" -gt 0 ] 2>/dev/null; then printf 'changes'; return; fi
@@ -384,30 +377,47 @@ gci_daemon_alive() {
 # and every plugin's tokens share ONE name space. GITLAB_CI_TOKEN_PREFIX moves all of
 # ours out of the way of a colliding plugin in one setting; the prefix must be mirrored
 # in rows.
-GCI_TOKEN_SUFFIXES='ci_ok ci_fail ci_run ci_none review mr'
+GCI_CI_BUCKETS='ok fail run none'
+GCI_REVIEW_STATES='conflict changes draft approved awaiting merged'
 gci_token_name() { printf '%s' "${GITLAB_CI_TOKEN_PREFIX:-}$1"; }
 
-# gci_report_tokens <ws_id> <bucket> <ci_value> <review_value> <mr_value> <seq> <ttl_ms>
-# <bucket> is a gci_status_bucket result, or "" for "no CI state at all".
+# Every token this plugin can publish, in row order.
+gci_token_suffixes() {
+  local b st
+  for b in $GCI_CI_BUCKETS;    do printf 'ci_%s\n' "$b"; done
+  for st in $GCI_REVIEW_STATES; do printf 'review_%s\n' "$st"; done
+  printf 'mr\n'
+}
+
+# gci_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms>
+# <ci_status> is a canonical CI status ("" = none at all); <review_state> a canonical
+# review state ("" = no MR/PR).
 #
 # Every token goes in ONE call. --seq is tracked per (workspace, source) and a report
 # whose seq is <= the last accepted one is silently ignored, so a second call in the
 # same second would be lost.
 #
-# The CI value is published under the bucket's token and the other three buckets are
-# sent EMPTY, which clears them — that is what keeps exactly one CI token live per
-# space as the state changes, so the user's per-state `fg` colours it.
+# Both CI and review publish under the token named for their current state and send
+# every sibling state EMPTY, which clears it. That is what keeps exactly one CI token
+# and one review token live per space, so the user's per-state `fg` can colour them —
+# herdr's token style is static config, so a single token could only have one colour.
 # An empty value clearing its token is also what makes a set-but-empty
 # GITLAB_CI_ICON_* override hide that glyph rather than render a blank slot.
 gci_report_tokens() {
-  local wsid="$1" bucket="$2" ci="$3" review="$4" mr="$5" seq="$6" ttl="$7" b
+  local wsid="$1" status="$2" review="$3" mr="$4" seq="$5" ttl="$6" b st bucket
   local -a args=()
-  for b in ok fail run none; do
-    if [ "$b" = "$bucket" ]; then args+=(--token "$(gci_token_name "ci_$b")=$ci")
+  bucket=""
+  [ -n "$status" ] && bucket="$(gci_status_bucket "$status")"
+  for b in $GCI_CI_BUCKETS; do
+    if [ "$b" = "$bucket" ]; then args+=(--token "$(gci_token_name "ci_$b")=$(gci_ci_cell "$status")")
     else                         args+=(--token "$(gci_token_name "ci_$b")=")
     fi
   done
-  args+=(--token "$(gci_token_name review)=$review")
+  for st in $GCI_REVIEW_STATES; do
+    if [ "$st" = "$review" ]; then args+=(--token "$(gci_token_name "review_$st")=$(gci_review_glyph "$st")")
+    else                          args+=(--token "$(gci_token_name "review_$st")=")
+    fi
+  done
   args+=(--token "$(gci_token_name mr)=$mr")
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$wsid" \
     --source gitlab-ci-status \
@@ -420,7 +430,7 @@ gci_report_tokens() {
 gci_clear_tokens() {
   local sfx
   local -a args=()
-  for sfx in $GCI_TOKEN_SUFFIXES; do args+=(--clear-token "$(gci_token_name "$sfx")"); done
+  while IFS= read -r sfx; do args+=(--clear-token "$(gci_token_name "$sfx")"); done < <(gci_token_suffixes)
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
     --source gitlab-ci-status \
     "${args[@]}" \
@@ -669,8 +679,8 @@ gci_review_for_mr() {
             mergeable
             reviewDecision
             reviewThreads(first:100){ nodes { isResolved } }
-            reviewRequests(first:1){ totalCount }
-            latestOpinionatedReviews(first:100){ nodes { state } }
+            reviewRequests(first:100){ totalCount nodes { requestedReviewer { ... on User { login } } } }
+            latestOpinionatedReviews(first:100){ nodes { state author { login } } }
           }
         }
       }' 2>/dev/null)" || return 0
@@ -680,7 +690,15 @@ gci_review_for_mr() {
     mergeable="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.mergeable // "UNKNOWN"' 2>/dev/null)"
     decision="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewDecision // ""' 2>/dev/null)"
     unresolved="$(printf '%s' "$resp" | jq -r '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved==false)] | length' 2>/dev/null)"
-    standing="$(printf '%s' "$resp" | jq -r '[.data.repository.pullRequest.latestOpinionatedReviews.nodes[]? | select(.state=="CHANGES_REQUESTED")] | length' 2>/dev/null)"
+    # Only verdicts from reviewers who are NOT pending again: a re-request retires the old one.
+    standing="$(printf '%s' "$resp" | jq -r '
+      .data.repository.pullRequest as $p
+      | (($p.reviewRequests.nodes // []) | map(.requestedReviewer.login // empty)) as $pend
+      | [ (($p.latestOpinionatedReviews.nodes // [])[]
+           | select(.state == "CHANGES_REQUESTED")
+           | (.author.login // "") as $a
+           | select(($pend | index($a)) == null) ) ]
+      | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
     GCI_REVIEW="$(gci_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
   fi

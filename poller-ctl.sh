@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Always-live poller: publishes each space's CI status and MR/PR number as herdr
-# sidebar metadata tokens (`ci_*`, `review`, `mr`). It never touches space labels or the
+# sidebar metadata tokens (`ci_*`, `review_*`, `mr`). It never touches space labels or the
 # agent status dot. Control: start | stop | toggle | ensure | status | poll-once | restore | run
 #
 # Env:
@@ -35,24 +35,25 @@ ws_list() {
 # Resolve a repo's sidebar state into globals (NOT stdout) so it can run without a
 # subshell — that lets the MR/PR lookup reuse the path/branch/provider that
 # gci_latest_ci just resolved:
-#   SPACE_BUCKET  ok|fail|run|none, "" (unsupported remote), or "SKIP" (transient error)
-#   SPACE_CI      the CI cell, "CI <glyph>", or "" when the glyph is hidden
-#   SPACE_REVIEW  review-state glyph, or "" (nothing to flag)
+#   SPACE_STATUS  canonical CI status, or "" (unsupported remote / nothing to say)
+#   SPACE_REVIEW  canonical review state, or "" (no MR/PR)
 #   SPACE_MR      open/merged MR/PR number incl. sigil ("!123" / "#123") or "" (none)
+#   SPACE_SKIP    1 on a transient provider error — publish nothing this tick
+# These stay CANONICAL, not display strings: gci_report_tokens turns a state into the
+# token named for it, which is what lets the user colour each state separately.
 # Review state is its own token, not glued to the number: they are separate facts and
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
   local cwd="$1" rc
-  SPACE_BUCKET=""; SPACE_CI=""; SPACE_REVIEW=""; SPACE_MR=""
+  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_MR=""; SPACE_SKIP=""
   gci_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
-    5)       SPACE_BUCKET="SKIP"; return ;;
+    5)       SPACE_SKIP=1; return ;;
     0)
       # An empty $GCI_STATUS (supported remote, no pipeline/run for this branch) buckets
-      # as "none" on its own, so it needs no separate branch here.
-      SPACE_BUCKET="$(gci_status_bucket "$GCI_STATUS")"
-      SPACE_CI="$(gci_ci_cell "$GCI_STATUS")"
+      # as "none" downstream, so it needs no separate branch here.
+      SPACE_STATUS="${GCI_STATUS:-none}"
       # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
       # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
       # here (not inside the old `if gci_open_pr`) because a merged PR returns rc 3 by definition,
@@ -60,7 +61,7 @@ status_for_repo() {
       gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; rc=$?
       if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gci_merged_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; }; then
         [ "$rc" -eq 0 ] && gci_review_for_mr "$cwd" "$GCI_MR_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
-        SPACE_REVIEW="$(gci_review_badge_glyph "$GCI_REVIEW")"
+        SPACE_REVIEW="$GCI_REVIEW"
         SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
       fi
       ;;
@@ -85,18 +86,18 @@ poll_once() {
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
     cwd="$(gci_pick_pane_cwd "$wsid" "$panes")"
     if [ -z "$cwd" ]; then
-      SPACE_BUCKET=""; SPACE_CI=""; SPACE_REVIEW=""; SPACE_MR=""
+      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_MR=""; SPACE_SKIP=""
     else
       status_for_repo "$cwd"
     fi
     # Transient API error: publish nothing and let the already-published value ride out
     # its TTL, rather than blanking the sidebar over one failed call.
-    [ "$SPACE_BUCKET" = "SKIP" ] && continue
+    [ -n "$SPACE_SKIP" ] && continue
     if [ -n "$DRYRUN" ]; then
-      printf 'would report %s: ci_%s=%q review=%q mr=%q (ttl %sms)\n' \
-        "$wsid" "${SPACE_BUCKET:-none}" "$SPACE_CI" "$SPACE_REVIEW" "$SPACE_MR" "$ttl"
+      printf 'would report %s: ci=%q review=%q mr=%q (ttl %sms)\n' \
+        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_MR" "$ttl"
     else
-      gci_report_tokens "$wsid" "$SPACE_BUCKET" "$SPACE_CI" "$SPACE_REVIEW" "$SPACE_MR" "$seq" "$ttl"
+      gci_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_MR" "$seq" "$ttl"
     fi
   done 9< <(ws_list)
 }

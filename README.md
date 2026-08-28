@@ -51,15 +51,22 @@ ways:
  r refresh · q quit · auto-refresh 15s
 ```
 
-In the sidebar, those spaces show as `🟢 !123 my-service` and `🟢 #123 web-app`.
+In the sidebar, those spaces show as `CI 🟢 !123 my-service` and `CI 🟢 ✅ #123 web-app`.
 
-The open MR/PR number is also prefixed with a **review-state glyph** when the merge request
-needs attention or is ready: `💬` changes requested / unresolved threads · `⚠️` merge conflict
-(needs rebase) · `✅` approved & mergeable (ready to merge). Drafts and MRs merely awaiting
-review show the plain `!123` / `#123` with no glyph. On GitHub, re-requesting review after
-addressing feedback returns the PR to awaiting (no glyph) — stale threads and the old
-review decision don't keep it at `💬` while the ball is in a reviewer's court. So a space might read `🟢 ✅!123 my-service`
-(green pipeline, MR approved) or `🔴 💬!88 billing-api` (red pipeline, changes requested).
+The **review state** is its own token, one per canonical state: `⚠️` merge conflict (needs
+rebase) · `💬` changes requested / unresolved threads · `📝` draft · `✅` approved & mergeable ·
+`👀` awaiting review · `🔀` merged. The plugin publishes whichever one applies and clears the
+rest; which of them you actually see is decided by your `rows` (see
+[Configure the sidebar](#configure-the-sidebar)), not by the plugin.
+
+**Re-requested reviews count.** On GitHub, re-requesting review after addressing feedback hands
+the ball back to that reviewer, so the PR reads `👀` awaiting rather than staying at `💬`. This is
+per reviewer: a standing "changes requested" verdict is retired only if *its own author* is in the
+PR's pending review requests. Another reviewer still having an unanswered request does not retire
+it. (GitHub keeps a re-requested reviewer in `latestOpinionatedReviews` *and* `reviewRequests`
+simultaneously, so the author comparison is what makes this work — counting standing verdicts
+alone pins such a PR to `💬` forever.) The sticky `reviewDecision` and unresolved threads that
+outlive a pushed fix likewise only count while nothing at all is pending.
 
 Once the branch's MR/PR is **merged**, the open-request token is replaced by a `🔀` merged badge
 (e.g. `🔀#123` / `🔀!123`) — a positive signal that the branch landed, instead of the token
@@ -99,16 +106,27 @@ rows = [
    { token = "$ci_fail", fg = "#f7768e" },      # …red
    { token = "$ci_run",  fg = "#e0af68" },      # …yellow
    { token = "$ci_none", dim = true },
-   { token = "$review" }, { token = "$mr" },
+   { token = "$review_conflict", fg = "#f7768e" },
+   { token = "$review_changes",  fg = "#e0af68" },
+   { token = "$review_approved", fg = "#9ece6a" },
+   { token = "$review_merged",   fg = "#bb9af7" },   # …purple
+   { token = "$review_awaiting", dim = true },
+   { token = "$review_draft",    dim = true },
+   { token = "$mr" },
    "branch", "git_status"],
 ]
 ```
 
-**Why four CI tokens.** herdr's token style is static config — `{ token, fg, bold, dim }`, with no
-conditional form — so one token cannot change colour by state. The state therefore lives in the
-token *name*: the poller publishes the CI cell under exactly one of `ci_ok` / `ci_fail` / `ci_run` /
-`ci_none` and clears the other three, so only one of those four row entries ever renders. Drop the
-`fg`s and a single `{ token = "$ci_ok" }`…`{ token = "$ci_none" }` set still works, just uncoloured.
+**Why one token per state.** herdr's token style is static config — `{ token, fg, bold, dim }`,
+with no conditional form — so one token cannot change colour by state. The state therefore lives
+in the token *name*: the poller publishes the CI cell under exactly one of `ci_ok` / `ci_fail` /
+`ci_run` / `ci_none`, the review glyph under exactly one of the six `review_*` names, and clears
+every sibling. Only one entry from each group ever renders, so a long-looking row stays short on
+screen. Drop the `fg`s and it all still works, just uncoloured.
+
+**This is also how you choose what to surface.** The plugin has no opinion any more: omit
+`$review_draft` and `$review_awaiting` and you get the old "only attention + ready" behaviour;
+include them and you can see which PRs are parked with a reviewer.
 
 `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
 paste your own theme's hex rather than the values above. A bare `{ token = "$review" }` with no
@@ -235,12 +253,13 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
   (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot, e.g.
   `GITLAB_CI_ICON_NONE=` shows nothing when a branch has no pipeline.
 - `GITLAB_CI_TOKEN_PREFIX` — prepended to every sidebar token name (`ci_ok`, `ci_fail`, `ci_run`,
-  `ci_none`, `review`, `mr`). Token names are one namespace shared by all plugins, so set this if
-  another plugin already publishes one of those names — then mirror the prefix in
+  `ci_none`, `review_conflict`, `review_changes`, `review_draft`, `review_approved`,
+  `review_awaiting`, `review_merged`, `mr`). Token names are one namespace shared by all plugins,
+  so set this if another plugin already publishes one of those names — then mirror the prefix in
   `ui.sidebar.spaces.rows`. Default empty.
 - `GITLAB_CI_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
-  review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). The sidebar badge only ever shows
-  conflict/changes/approved/merged; draft/awaiting appear in the My MRs pane.
+  review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). Each state has its own sidebar
+  token, so which of them appear is up to your `rows`.
 
 Example — monochrome Nerd Font icons instead of emoji (needs a Nerd-patched terminal font,
 otherwise these render as tofu boxes):
@@ -281,8 +300,9 @@ this plugin cannot collide with another that decorates them.
 Every token goes in one call, because `--seq` is tracked per (workspace, source) and a report whose
 seq is not greater than the last accepted one is silently ignored. The seq is epoch seconds rather
 than a per-start counter, so a daemon restart does not start emitting values herdr will drop. The CI
-cell is published under the current state's `ci_*` token and the other three are sent empty, which
-clears them — that is how exactly one CI token stays live per space as the state changes.
+cell is published under the current state's `ci_*` token and the review glyph under the current
+state's `review_*` token, with every sibling state sent empty, which clears it — that is how
+exactly one CI token and one review token stay live per space as the state changes.
 
 Tokens carry a TTL and herdr expires them itself, which is why the poller republishes every tick
 rather than only on change — publishing on change alone would let the sidebar blank while a repo is
