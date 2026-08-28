@@ -175,6 +175,48 @@ check "e2e-gh-rereq-other-author" "changes" "$GCI_REVIEW"
 GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"CHANGES_REQUESTED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":1,"nodes":[{"requestedReviewer":{}}]},"latestOpinionatedReviews":{"nodes":[{"state":"CHANGES_REQUESTED","author":{"login":"marekzp"}}]}}}}}'
 gci_review_for_mr "$DIR" myorg/app 1 github
 check "e2e-gh-rereq-team" "changes" "$GCI_REVIEW"
+# GCI_REQUIRED_NAMES extraction from the same PR projection (no extra API call).
+ROLLUP='"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"django-test","isRequired":true},
+  {"__typename":"CheckRun","name":"lint / pre_commit","isRequired":false},
+  {"__typename":"CheckRun","name":"migrations-checks","isRequired":true}]}}}}]}'
+PR_HEAD='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":0,"nodes":[]},"latestOpinionatedReviews":{"nodes":[]},'
+GH_FIXTURE="$PR_HEAD$ROLLUP}}}}"
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "reqnames-only-required" "$(printf 'django-test\nmigrations-checks')" "$GCI_REQUIRED_NAMES"
+
+# A required legacy StatusContext disables filtering: REST commits/<sha>/check-runs returns
+# check runs ONLY, so filtering by name would drop a failing required status and show green
+# while the merge is blocked. Empty = fall back to counting everything.
+GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"django-test","isRequired":true},
+  {"__typename":"StatusContext","context":"ci/legacy","isRequired":true}]}}}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "reqnames-statuscontext-guard" "" "$GCI_REQUIRED_NAMES"
+# A NON-required StatusContext is harmless — filtering still applies.
+GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"django-test","isRequired":true},
+  {"__typename":"StatusContext","context":"ci/legacy","isRequired":false}]}}}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "reqnames-optional-statuscontext" "django-test" "$GCI_REQUIRED_NAMES"
+# No branch protection at all -> nothing required -> no filtering.
+GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"django-test","isRequired":false}]}}}}]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "reqnames-none-required" "" "$GCI_REQUIRED_NAMES"
+# An absent rollup (repo with no checks, or an older projection) must yield empty, not an error.
+GH_FIXTURE='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]},"reviewRequests":{"totalCount":0,"nodes":[]},"latestOpinionatedReviews":{"nodes":[]}}}}}'
+gci_review_for_mr "$DIR" myorg/app 1 github
+check "reqnames-absent-rollup" "" "$GCI_REQUIRED_NAMES"
+check "reqnames-absent-rollup-review" "approved" "$GCI_REVIEW"
+# Loop-carried-state guard: the names must NOT survive into the next space's lookup. A repo
+# with no PR (path/iid empty) returns early — it must still have cleared the previous set,
+# or two worktrees of one repo would filter each other's CI by a sibling PR's guards.
+GH_FIXTURE="$PR_HEAD$ROLLUP}}}}"
+gci_review_for_mr "$DIR" myorg/app 1 github            # populates the names
+gci_review_for_mr "$DIR" "" "" github                  # no PR: must reset
+check "reqnames-not-loop-carried" "" "$GCI_REQUIRED_NAMES"
+
 unset -f gh
 
 # gci_strip_ci_prefix with a review glyph on the MR token (review-state badge)
@@ -299,6 +341,32 @@ check "chk-success"      "success	2	u2	t2" "$(printf 'completed\tskipped\t1\tu1\
 check "chk-queued"       "pending	1	u1	t1" "$(printf 'queued\t\t1\tu1\tt1\ncompleted\tskipped\t2\tu2\tt2\n' | gci_github_checks_status)"
 check "chk-skipped-only" "skipped	1	u1	t1" "$(printf 'completed\tskipped\t1\tu1\tt1\n' | gci_github_checks_status)"
 check "chk-empty"        "" "$(printf '' | gci_github_checks_status)"
+
+# gci_required_status — only merge-guarding checks decide the CI cell. Modelled on
+# Photoroom/content_backend#3397, where "lint / pre_commit" failed while all three required
+# checks passed, turning the whole space red for something that could not block the merge.
+CR_JSON='{"check_runs":[
+  {"name":"django-test","status":"completed","conclusion":"success","id":1,"html_url":"u1","completed_at":"t1"},
+  {"name":"lint / pre_commit","status":"completed","conclusion":"failure","id":2,"html_url":"u2","completed_at":"t2"},
+  {"name":"fastapi-test","status":"completed","conclusion":"skipped","id":3,"html_url":"u3","completed_at":"t3"},
+  {"name":"migrations-checks","status":"completed","conclusion":"success","id":4,"html_url":"u4","completed_at":"t4"}]}'
+REQ_3="$(printf 'django-test\nfastapi-test\nmigrations-checks')"
+# Unfiltered, the failing optional lint wins:
+check "req-unfiltered" "failed" "$(printf '%s' "$CR_JSON" \
+  | jq -r '.check_runs[]|[.status,.conclusion//"",(.id|tostring),.html_url//"",(.completed_at//"")]|@tsv' \
+  | gci_github_checks_status | cut -f1)"
+# Filtered to the merge guards, it does not — and a SKIPPED required check does not veto,
+# matching GitHub's merge box:
+check "req-filtered"   "success" "$(gci_required_status "$CR_JSON" "$REQ_3" | cut -f1)"
+# A required check that IS failing still wins:
+check "req-fail-wins"  "failed"  "$(gci_required_status "$CR_JSON" "$(printf 'django-test\nlint / pre_commit')" | cut -f1)"
+# Empty name list = "do not filter": prints nothing, caller keeps the unfiltered verdict.
+check "req-no-names"   ""        "$(gci_required_status "$CR_JSON" "")"
+# None of the required checks has run on this commit yet: also nothing, so the caller falls
+# back rather than reporting the branch as having no CI.
+check "req-absent"     ""        "$(gci_required_status "$CR_JSON" "not-run-here")"
+# A name is matched whole, not as a substring — "test" must not match "django-test".
+check "req-exact-name" ""        "$(gci_required_status "$CR_JSON" "test")"
 
 # gci_latest_ci (github) — a branch missing on the remote (deleted on merge, or not pushed
 # yet) makes commits/<ref>/check-runs fail with HTTP 422 "No commit found for SHA". That is

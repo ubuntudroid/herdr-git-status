@@ -503,7 +503,7 @@ gci_upstream_path() {
 gci_latest_ci() {
   local repo="$1" url parsed enc resp run up
   GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
-  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""
+  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""; GCI_CI_RESP=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 2
   parsed="$(gci_parse_remote "$url")" || return 3
@@ -547,6 +547,9 @@ gci_latest_ci() {
     run="$(printf '%s' "$resp" \
       | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
       | gci_github_checks_status)"
+    # Keep the response that produced $run: gci_required_status re-aggregates it with a
+    # merge-guard filter, and re-fetching would double this plugin's API cost.
+    GCI_CI_RESP="$resp"
     # Fork PRs' `pull_request` check runs attach to the head commit in the BASE repo; on
     # no-hit, retry the upstream slug (retry errors = "no run" — origin already answered).
     if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
@@ -554,12 +557,29 @@ gci_latest_ci() {
         && run="$(printf '%s' "$resp" \
           | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
           | gci_github_checks_status)" \
-        && [ -n "$run" ] && GCI_CI_PATH="$up" || true
+        && [ -n "$run" ] && { GCI_CI_PATH="$up"; GCI_CI_RESP="$resp"; } || true
     fi
     [ -n "$run" ] || return 0
     IFS=$'\t' read -r GCI_STATUS GCI_CI_ID GCI_CI_URL GCI_CI_UPDATED <<<"$run"
   fi
   return 0
+}
+
+# gci_required_status <check_runs_json> <required_names>
+# Re-aggregate ONLY the checks that gate merging. <required_names> is the newline-separated
+# list gci_review_for_mr resolved for the PR; empty means "do not filter" and this prints
+# nothing. Also prints nothing when none of the required checks has run on this commit yet —
+# callers must treat that as "keep the unfiltered verdict", not as "no CI".
+# Output shape matches gci_github_checks_status: "canonical \t id \t url \t updated".
+gci_required_status() {
+  [ -n "$2" ] || return 0
+  printf '%s' "$1" | jq -r --arg req "$2" '
+    ($req | split("\n") | map(select(length > 0))) as $names
+    | .check_runs[]?
+    | select(.name as $n | ($names | index($n)) != null)
+    | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")]
+    | @tsv' 2>/dev/null \
+    | gci_github_checks_status
 }
 
 # Look up the open MR/PR whose source/head branch is <branch>, dispatching on
@@ -670,6 +690,10 @@ gci_review_for_mr() {
   local repo="$1" path="$2" iid="$3" provider="$4"
   local enc resp dms blocking draft mergeable decision unresolved standing pending owner name
   GCI_REVIEW=""
+  # Reset alongside GCI_REVIEW: the poller calls this per space in a loop, and a space with
+  # no PR must never inherit the previous space's required set — two worktrees of the same
+  # repo would have matching check names, so a sibling PR's guards would silently filter it.
+  GCI_REQUIRED_NAMES=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
     enc="$(gci_urlencode_path "$path")"
@@ -690,6 +714,11 @@ gci_review_for_mr() {
             reviewThreads(first:100){ nodes { isResolved } }
             reviewRequests(first:100){ totalCount nodes { requestedReviewer { ... on User { login } } } }
             latestOpinionatedReviews(first:100){ nodes { state author { login } } }
+            commits(last:1){ nodes { commit { statusCheckRollup { contexts(first:100){ nodes {
+              __typename
+              ... on CheckRun     { name    isRequired(pullRequestNumber:$number) }
+              ... on StatusContext{ context isRequired(pullRequestNumber:$number) }
+            } } } } } }
           }
         }
       }' 2>/dev/null)" || return 0
@@ -710,6 +739,17 @@ gci_review_for_mr() {
       | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
     GCI_REVIEW="$(gci_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
+    # Names of the checks that actually gate merging, for gci_required_status.
+    # A required legacy StatusContext disables filtering entirely: the REST
+    # commits/<sha>/check-runs endpoint returns check runs ONLY and never sees a commit
+    # status, so filtering by name would drop a failing required status and report green
+    # while the merge is in fact blocked. Falling back to "count everything" is the safe
+    # direction — same answer as before this feature existed.
+    GCI_REQUIRED_NAMES="$(printf '%s' "$resp" | jq -r '
+      [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
+        | select(.isRequired == true) ] as $req
+      | if ($req | any(.__typename == "StatusContext")) then ""
+        else ($req | map(.name // empty) | join("\n")) end' 2>/dev/null)"
   fi
   return 0
 }

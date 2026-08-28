@@ -184,6 +184,24 @@ requested / unresolved threads, or merge conflict). Each MR id is a clickable OS
 pane: `r` refresh, `q` quit (Ctrl-C also closes), auto-refresh 15s. Always invokable via
 `herdr plugin action invoke gitlab-ci-status.open-mr`.
 
+**Only merge-guarding checks decide the CI cell.** On GitHub, when the branch has an open PR, the
+cell aggregates just that PR's *required* status checks — the ones branch protection or a ruleset
+makes a merge guard. A failing optional check (a lint job, a coverage bot, a preview deploy) no
+longer shows the space as broken when nothing is actually blocking the merge. A `SKIPPED` required
+check does not veto, matching GitHub's merge box.
+
+Because required-ness is a per-PR fact (GitHub exposes it as `isRequired(pullRequestNumber:)`), the
+narrowing applies only where a PR exists; a branch with no PR has no merge to guard, so every check
+still counts. Three further cases fall back to counting everything, which is the pre-narrowing
+behaviour: no required checks configured, none of the required checks having run on this commit yet,
+and a required *legacy commit status* rather than a check run — the REST endpoint the plugin reads
+returns check runs only, so filtering by name there could hide a failing required status and show
+green while the merge is blocked.
+
+This costs no extra API call: the required names come from the same PR projection that resolves the
+review state. GitLab is unaffected (its merge model has no equivalent per-check required flag), and
+the **detail pane still shows every check** — that is where you go to see what actually broke.
+
 > **Note on branch vs MR/PR pipelines:** status is looked up for the current *branch* (GitLab pipelines
 > by `ref`; GitHub aggregates all check runs on the branch head — the most severe one wins, so one
 > skipped workflow can't mask a green or running push). GitLab projects that run CI only as merge-request
