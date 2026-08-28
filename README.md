@@ -268,11 +268,16 @@ because they do not survive copy-paste through every editor — write them with
 `perl -CSD -e 'print "GITLAB_CI_ICON_OK=\x{F4A4}\n"'` or your editor's insert-codepoint command.
 
 ```sh
-# CI cell, matching GitHub's check-status icons:
+# CI cell — one dot for every state, as in GitHub's commit-status dot. Colour carries
+# the state, so the glyph does not have to (see Configure the sidebar):
+#   OK / FAIL / RUN   nf-oct-dot_fill   U+F444
+#   NONE              leave empty for no cell at all, or nf-oct-skip U+F517
+#
+# If your rows do NOT colour the ci_* tokens, use distinct glyphs instead, matching
+# GitHub's check-status icons:
 #   OK    nf-oct-check_circle_fill      U+F4A4
 #   FAIL  nf-oct-x_circle_fill          U+F530
-#   RUN   nf-oct-dot_fill               U+F444   (GitHub's in-progress / queued dot)
-#   NONE  leave empty for no cell at all, or nf-oct-skip U+F517
+#   RUN   nf-oct-dot_fill               U+F444
 
 # Review cell, matching GitHub's merge box and Reviewers list:
 #   CONFLICT  nf-oct-alert                    U+F421
@@ -283,8 +288,10 @@ because they do not survive copy-paste through every editor — write them with
 #   MERGED    nf-oct-git_merge                U+F419
 ```
 
-`dot_fill` intentionally serves both "CI running" and "review required", as it does on GitHub; the
-`CI` and `R` prefixes are what tell the two cells apart.
+`dot_fill` deliberately does a lot of work here — every CI state plus "review required" — because
+that is how GitHub's own status dots read. What separates the cells is the `CI` and `R` prefixes;
+what separates the states within a cell is colour. That trade is only sound if your rows actually
+colour the tokens, hence the uncoloured fallback above.
 
 Outline/fill counterparts exist for some of these, if you prefer one weight throughout:
 `check_circle` U+F49E · `x_circle` U+F52F · `dot` U+F4C3 · `alert_fill` U+F40C · `skip_fill` U+F518.
