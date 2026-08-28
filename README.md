@@ -286,6 +286,16 @@ because they do not survive copy-paste through every editor — write them with
 `dot_fill` intentionally serves both "CI running" and "review required", as it does on GitHub; the
 `CI` and `R` prefixes are what tell the two cells apart.
 
+Outline/fill counterparts exist for some of these, if you prefer one weight throughout:
+`check_circle` U+F49E · `x_circle` U+F52F · `dot` U+F4C3 · `alert_fill` U+F40C · `skip_fill` U+F518.
+There is no fill variant of `file_diff`, `check`, `git_merge`, or `git_pull_request_draft` — the
+octicon set has only 19 `_fill` glyphs in total, so a fully filled set is not achievable.
+
+**Colours pair with these glyphs in `ui.sidebar.spaces.rows`, not in the plugin.** Following
+GitHub's own status semantics: red for conflict *and* changes-requested (they differ by glyph, as
+on GitHub), yellow for anything pending (CI running and review-required alike), green for
+passing/approved, purple for merged, and theme-default for draft and "no pipeline".
+
 To change keybindings, edit the `[[keys.command]]` entries in your `config.toml` (see above). For pane
 placement, edit `herdr-plugin.toml` and re-link.
 
