@@ -190,13 +190,22 @@ makes a merge guard. A failing optional check (a lint job, a coverage bot, a pre
 longer shows the space as broken when nothing is actually blocking the merge. A `SKIPPED` required
 check does not veto, matching GitHub's merge box.
 
-Because required-ness is a per-PR fact (GitHub exposes it as `isRequired(pullRequestNumber:)`), the
-narrowing applies only where a PR exists; a branch with no PR has no merge to guard, so every check
-still counts. Three further cases fall back to counting everything, which is the pre-narrowing
-behaviour: no required checks configured, none of the required checks having run on this commit yet,
-and a required *legacy commit status* rather than a check run — the REST endpoint the plugin reads
-returns check runs only, so filtering by name there could hide a failing required status and show
-green while the merge is blocked.
+**No merge guards, no cell.** The cell reports merge-guarding checks, so it appears only where such
+checks exist. It is omitted entirely when:
+
+- the branch has no open PR — required-ness is a per-PR fact (`isRequired(pullRequestNumber:)`), and
+  a branch with no PR has no merge to guard;
+- the PR has no required checks configured at all;
+- required checks exist but none has run on this commit yet, so there is no guard verdict;
+- there is no CI on the commit at all.
+
+The one case that still shows the *unfiltered* verdict is a required **legacy commit status** rather
+than a check run: guards demonstrably exist, but the REST endpoint the plugin reads returns check
+runs only and never sees a commit status, so filtering by name could hide a failing required status
+and report green while the merge is blocked. Showing everything is the safe direction there.
+
+The practical effect is that CI appears on branches you are actually trying to land, and stays quiet
+on long-lived checkouts like `main`.
 
 This costs no extra API call: the required names come from the same PR projection that resolves the
 review state. GitLab is unaffected (its merge model has no equivalent per-check required flag), and

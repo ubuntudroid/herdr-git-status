@@ -501,7 +501,7 @@ gci_upstream_path() {
 #   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable
 #   4 unsupported-host (not GitLab/GitHub) | 5 api-error (incl. missing provider CLI)
 gci_latest_ci() {
-  local repo="$1" url parsed enc resp run up
+  local repo="$1" url parsed enc resp run up sha
   GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
   GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""; GCI_CI_RESP=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
@@ -550,10 +550,19 @@ gci_latest_ci() {
     # Keep the response that produced $run: gci_required_status re-aggregates it with a
     # merge-guard filter, and re-fetching would double this plugin's API cost.
     GCI_CI_RESP="$resp"
-    # Fork PRs' `pull_request` check runs attach to the head commit in the BASE repo; on
+    # Fork PRs' `pull_request` check runs attach to the head COMMIT in the BASE repo; on
     # no-hit, retry the upstream slug (retry errors = "no run" — origin already answered).
-    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
-      resp="$(cd "$repo" && gh api "repos/$up/commits/$enc/check-runs?per_page=100" 2>/dev/null)" \
+    #
+    # Retry by sha, NOT by branch name. The upstream repo has its own branch of the same
+    # name pointing at an unrelated commit, so `commits/<branch>/check-runs` there answers
+    # about upstream's HEAD and reported ITS result as this checkout's — seen live on a fork
+    # of an unmaintained repo whose own main had no CI at all, which then showed green
+    # because upstream's main was green. A sha only resolves upstream when the commit is
+    # genuinely shared, which is exactly the fork-PR case this retry exists for; otherwise
+    # GitHub answers 422 and we correctly report no CI.
+    if [ -z "$run" ] && sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)" && [ -n "$sha" ] \
+       && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
+      resp="$(cd "$repo" && gh api "repos/$up/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
         && run="$(printf '%s' "$resp" \
           | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
           | gci_github_checks_status)" \
@@ -694,6 +703,10 @@ gci_review_for_mr() {
   # no PR must never inherit the previous space's required set — two worktrees of the same
   # repo would have matching check names, so a sibling PR's guards would silently filter it.
   GCI_REQUIRED_NAMES=""
+  # Set when required checks EXIST but cannot be filtered by name (see below). Distinct from
+  # an empty name list, which means "nothing is required": callers hide the CI cell in that
+  # case but must still show it here, because guards do exist.
+  GCI_REQUIRED_OPAQUE=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
     enc="$(gci_urlencode_path "$path")"
@@ -750,6 +763,11 @@ gci_review_for_mr() {
         | select(.isRequired == true) ] as $req
       | if ($req | any(.__typename == "StatusContext")) then ""
         else ($req | map(.name // empty) | join("\n")) end' 2>/dev/null)"
+    if [ -z "$GCI_REQUIRED_NAMES" ] && printf '%s' "$resp" | jq -e '
+          [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
+            | select(.isRequired == true) ] | length > 0' >/dev/null 2>&1; then
+      GCI_REQUIRED_OPAQUE=1
+    fi
   fi
   return 0
 }
