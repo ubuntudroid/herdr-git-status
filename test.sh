@@ -383,6 +383,14 @@ check "cell-fail"    "CI 🔴" "$(gci_ci_cell failed)"
 check "cell-ov"      "CI X"  "$(GITLAB_CI_ICON_OK=X gci_ci_cell success)"
 check "cell-hidden"  ""      "$(GITLAB_CI_ICON_NONE= gci_ci_cell canceled)"
 
+# gci_review_cell — labelled like the CI cell; a hidden glyph stays fully hidden.
+check "rcell-approved" "R ✅" "$(gci_review_cell approved)"
+check "rcell-changes"  "R 💬" "$(gci_review_cell changes)"
+check "rcell-merged"   "R 🔀" "$(gci_review_cell merged)"
+check "rcell-ov"       "R A"  "$(GITLAB_CI_ICON_APPROVED=A gci_review_cell approved)"
+check "rcell-hidden"   ""     "$(GITLAB_CI_ICON_AWAITING= gci_review_cell awaiting)"
+check "rcell-none"     ""     "$(gci_review_cell '')"
+
 # Token names: one prefix moves every token out of a colliding plugin's way.
 check "tok-default"  "ci_ok"     "$(gci_token_name ci_ok)"
 check "tok-prefixed" "gci_ci_ok" "$(GITLAB_CI_TOKEN_PREFIX=gci_ gci_token_name ci_ok)"
@@ -409,7 +417,7 @@ HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" \
 check "report-one-call" "1" "$(wc -l < "$ttmp/log" | tr -d ' ')"
 grep -q -- '--token ci_run=CI 🟡' "$ttmp/log";        check "report-ci-live-state"    "0" "$?"
 grep -q -- '--token ci_ok= --token ci_fail= ' "$ttmp/log"; check "report-ci-siblings-cleared" "0" "$?"
-grep -q -- '--token review_changes=💬' "$ttmp/log";   check "report-review-live-state" "0" "$?"
+grep -q -- '--token review_changes=R 💬' "$ttmp/log"; check "report-review-live-state" "0" "$?"
 grep -q -- '--token review_approved= ' "$ttmp/log";   check "report-review-siblings-cleared" "0" "$?"
 grep -q -- '--token mr=#7 --seq 42 --ttl-ms 9000' "$ttmp/log"; check "report-tail" "0" "$?"
 # No CI and no PR at all: every token empty, nothing stale left behind.

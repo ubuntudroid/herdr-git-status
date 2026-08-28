@@ -207,6 +207,15 @@ gci_review_glyph() {
   esac
 }
 
+# Canonical review state -> the sidebar cell: "R <glyph>". Same shape as gci_ci_cell: the
+# label says which cell this is, and a glyph hidden by a set-but-empty GITLAB_CI_ICON_*
+# stays fully hidden rather than rendering a bare "R".
+gci_review_cell() {
+  local g
+  g="$(gci_review_glyph "$1")"
+  [ -n "$g" ] && printf 'R %s' "$g"
+}
+
 # Canonical review state -> My-MRs pane section: "ready" (approved & mergeable),
 # "action" (conflict or changes), or "" (not surfaced: draft/awaiting/none).
 gci_mr_section() {
@@ -414,7 +423,7 @@ gci_report_tokens() {
     fi
   done
   for st in $GCI_REVIEW_STATES; do
-    if [ "$st" = "$review" ]; then args+=(--token "$(gci_token_name "review_$st")=$(gci_review_glyph "$st")")
+    if [ "$st" = "$review" ]; then args+=(--token "$(gci_token_name "review_$st")=$(gci_review_cell "$st")")
     else                          args+=(--token "$(gci_token_name "review_$st")=")
     fi
   done

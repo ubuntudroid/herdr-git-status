@@ -51,12 +51,12 @@ ways:
  r refresh · q quit · auto-refresh 15s
 ```
 
-In the sidebar, those spaces show as `CI 🟢 !123 my-service` and `CI 🟢 ✅ #123 web-app`.
+In the sidebar, those spaces show as `CI 🟢 !123 my-service` and `CI 🟢 R ✅ #123 web-app`.
 
-The **review state** is its own token, one per canonical state: `⚠️` merge conflict (needs
-rebase) · `💬` changes requested / unresolved threads · `📝` draft · `✅` approved & mergeable ·
-`👀` awaiting review · `🔀` merged. The plugin publishes whichever one applies and clears the
-rest; which of them you actually see is decided by your `rows` (see
+The **review state** is its own token, one per canonical state, rendered as `R <glyph>`: `⚠️` merge
+conflict (needs rebase) · `💬` changes requested / unresolved threads · `📝` draft · `✅` approved &
+mergeable · `👀` awaiting review · `🔀` merged. The plugin publishes whichever one applies and clears
+the rest; which of them you actually see is decided by your `rows` (see
 [Configure the sidebar](#configure-the-sidebar)), not by the plugin.
 
 **Re-requested reviews count.** On GitHub, re-requesting review after addressing feedback hands
@@ -261,16 +261,30 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
   review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). Each state has its own sidebar
   token, so which of them appear is up to your `rows`.
 
-Example — monochrome Nerd Font icons instead of emoji (needs a Nerd-patched terminal font,
-otherwise these render as tofu boxes):
+Example — GitHub's own octicons instead of emoji, so the sidebar matches what GitHub shows on the
+PR page (needs a Nerd-patched terminal font, otherwise these render as tofu boxes). Codepoints are
+`nf-oct-*` from Nerd Fonts v3. The glyphs are given as codepoints rather than literal characters
+because they do not survive copy-paste through every editor — write them with
+`perl -CSD -e 'print "GITLAB_CI_ICON_OK=\x{F4A4}\n"'` or your editor's insert-codepoint command.
 
 ```sh
-# nf-fa-check U+F00C · nf-fa-times U+F00D · nf-fa-circle U+F111
-#GITLAB_CI_ICON_OK=
-#GITLAB_CI_ICON_FAIL=
-#GITLAB_CI_ICON_RUN=
-#GITLAB_CI_ICON_NONE=          # empty = no dot for "no pipeline"
+# CI cell, matching GitHub's check-status icons:
+#   OK    nf-oct-check_circle_fill      U+F4A4
+#   FAIL  nf-oct-x_circle_fill          U+F530
+#   RUN   nf-oct-dot_fill               U+F444   (GitHub's in-progress / queued dot)
+#   NONE  leave empty for no cell at all, or nf-oct-skip U+F517
+
+# Review cell, matching GitHub's merge box and Reviewers list:
+#   CONFLICT  nf-oct-alert                    U+F421
+#   CHANGES   nf-oct-file_diff                U+F4D2
+#   DRAFT     nf-oct-git_pull_request_draft   U+F4DD
+#   APPROVED  nf-oct-check                    U+F42E
+#   AWAITING  nf-oct-dot_fill                 U+F444   (GitHub's "review required")
+#   MERGED    nf-oct-git_merge                U+F419
 ```
+
+`dot_fill` intentionally serves both "CI running" and "review required", as it does on GitHub; the
+`CI` and `R` prefixes are what tell the two cells apart.
 
 To change keybindings, edit the `[[keys.command]]` entries in your `config.toml` (see above). For pane
 placement, edit `herdr-plugin.toml` and re-link.
