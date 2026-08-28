@@ -4,10 +4,12 @@ Surfaces CI status inside herdr — for both **GitLab** (pipelines + merge reque
 **GitHub** (check runs + pull requests via `gh`), auto-detected from each repo's `origin` host — two
 ways:
 
-1. **Live status dots in the spaces sidebar** — a background poller prefixes each space's label with a
-   colored dot for its current branch's latest CI run (🟢 passed · 🟡 running · 🔴 failed · ⚪ none), plus
-   the open request number (`!123` for a GitLab MR, `#123` for a GitHub PR) when the branch has one. It
-   only edits the label text and never touches the agent status dot.
+1. **Live status dots in the spaces sidebar** — a background poller publishes two **metadata tokens**
+   per space: `ci`, a colored dot for the current branch's latest CI run (🟢 passed · 🟡 running ·
+   🔴 failed · ⚪ none), and `mr`, the open request number (`!123` for a GitLab MR, `#123` for a
+   GitHub PR) when the branch has one. Your space labels are never touched, and neither is the agent
+   status dot. Tokens render only where your sidebar layout asks for them — see
+   [Configure the sidebar](#configure-the-sidebar), which is a required one-time step.
 2. **An on-demand detail pane** — project, current branch, the latest pipeline/run status,
    the open MR/PR, and a list of the most recent **failed** pipelines/runs for the branch
    (up to 5). The project path, each run/pipeline `#id`, and the `!123`/`#123` are clickable
@@ -65,7 +67,7 @@ silently disappearing when the MR/PR leaves the open state.
 
 ## Requirements
 
-- **herdr** ≥ 0.7
+- **herdr** ≥ 0.8 (the `workspace report-metadata` API the sidebar tokens use)
 - **jq** and **git**
 - A provider CLI for whichever remotes you use, authenticated:
   - **glab** (GitLab CLI) — `glab auth login` — for GitLab repos
@@ -82,6 +84,35 @@ herdr plugin list        # confirm "gitlab-ci-status" is registered
 ```
 
 `herdr plugin link` is for local development and runs no build step — none is needed (pure Bash).
+
+## Configure the sidebar
+
+**Required, once.** The plugin publishes the `ci` and `mr` tokens, but herdr renders a token only
+if your layout asks for it by name — so until you add them, the poller runs and nothing appears.
+Add them to `~/.config/herdr/config.toml` and run `herdr server reload-config`:
+
+```toml
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace"],
+  [{ token = "$ci" }, { token = "$mr" }, "branch", "git_status"],
+]
+```
+
+Both rows here are herdr's defaults plus the two tokens; keep whatever you already have. Tokens
+can go on any row — put them on the first row instead if you want the dot next to the space name.
+
+A bare `{ token = "$ci" }` renders in your theme's normal foreground, which is usually what you
+want: the status colour is already in the glyph. An inline style table also accepts `bold`/`dim`
+and an `fg`, but `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme
+colour names there — so setting it pins that token to one colour across every theme.
+
+A row whose every entry is empty is not rendered at all. Putting the tokens on the second row
+therefore makes that row appear on spaces that previously had nothing to show there.
+
+If another plugin already publishes a token called `ci` or `mr`, rename ours with
+`GITLAB_CI_TOKEN_CI` / `GITLAB_CI_TOKEN_MR` (see [Configuration](#configuration)) and use the new
+names in `rows` — token names are a single shared namespace across all plugins.
 
 ## Keybindings (one-time setup)
 
@@ -110,9 +141,10 @@ command = "herdr plugin action invoke gitlab-ci-status.open-mr"
 
 ## Usage
 
-**Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space's label gets a
-colored CI dot, refreshed every 30s. Toggling off (or `herdr plugin action invoke
-gitlab-ci-status.stop`) removes the dots and restores your original labels.
+**Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space gets its `ci`
+and `mr` tokens refreshed every 30s. Toggling off (or `herdr plugin action invoke
+gitlab-ci-status.stop`) clears them immediately. Tokens also carry a TTL, so if the daemon is
+killed or the machine reboots they expire on their own within a few minutes.
 
 **Detail pane:** `ctrl+b` then `Shift+I` in a GitLab or GitHub workspace opens a split pane showing the
 project link, branch, latest pipeline/run, and open MR/PR. In the pane: **`r`** refresh, **`q`** quit
@@ -194,6 +226,9 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
 - `GITLAB_CI_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
   (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot, e.g.
   `GITLAB_CI_ICON_NONE=` shows nothing when a branch has no pipeline.
+- `GITLAB_CI_TOKEN_CI` / `GITLAB_CI_TOKEN_MR` — sidebar token names (defaults `ci` and `mr`).
+  Change these only to avoid a collision with another plugin, and mirror the change in
+  `ui.sidebar.spaces.rows`.
 - `GITLAB_CI_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
   review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). The sidebar badge only ever shows
   conflict/changes/approved/merged; draft/awaiting appear in the My MRs pane.
@@ -230,20 +265,35 @@ glab/gh supply authentication and the host; the plugin stores no tokens of its o
 
 The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actions) loops every
 `GITLAB_CI_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
-latest run and open MR/PR the same way, maps the status to a dot, and `herdr workspace rename`s the
-space to `"<dot> <sigil><num> <original label>"`. The original label is recovered each cycle by
-stripping any existing CI dot and `!`/`#` token, so it is idempotent and survives your own renames.
-`stop` kills the loop and restores all labels.
+latest run and open MR/PR the same way, maps the status to a dot, and publishes both values with
+`herdr workspace report-metadata --source gitlab-ci-status --token ci=… --token mr=…`. Labels are
+never written, so this plugin cannot collide with another that decorates them.
+
+Both tokens go in one call, because `--seq` is tracked per (workspace, source) and a report whose
+seq is not greater than the last accepted one is silently ignored. The seq is epoch seconds rather
+than a per-start counter, so a daemon restart does not start emitting values herdr will drop.
+
+Tokens carry a TTL and herdr expires them itself, which is why the poller republishes every tick
+rather than only on change — publishing on change alone would let the sidebar blank while a repo is
+quiet. The TTL is self-tuned to three times the measured poll cycle plus the interval (floor 90s),
+since the cycle is network-bound and grows with the number of spaces. Its real job is clearing the
+tokens when the daemon dies. `stop` clears them explicitly instead of waiting.
+
+A transient provider error leaves that space unpublished for the tick, so the previous value rides
+out its TTL instead of the dot blanking on one failed API call.
+
+On startup the daemon also runs one idempotent label-cleanup pass, which strips decorations left
+behind by versions of this plugin that wrote the label. `restore` runs the same pass on demand.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `herdr-plugin.toml` | Manifest: actions (`open`/`open-mr`/`start`/`stop`/`toggle`), the `ci` and `mr` panes, and keybindings. |
-| `poller-ctl.sh` | Always-live poller maintaining the colored CI dot on each space label: `start`/`stop`/`toggle`/`ensure`/`status`. |
+| `poller-ctl.sh` | Always-live poller publishing the `ci`/`mr` sidebar tokens: `start`/`stop`/`toggle`/`ensure`/`status`/`poll-once`/`restore`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
 | `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
 | `open-mr.sh` | Resolves the repo context and opens the "My MRs" pane. |
 | `mr-pane.sh` | The "My MRs" pane: my open MRs/PRs across providers, grouped ready / needs-action. |
-| `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader. |
+| `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader, sidebar token reporting. |
 | `test.sh` | Unit tests for `lib.sh`. Run with `bash test.sh`. |

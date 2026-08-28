@@ -353,6 +353,61 @@ check "ov-empty-roundtrip" "svc" "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix "$(
 # here it would eat the leading space of the label):
 check "ov-empty-strip"     " x"  "$(GITLAB_CI_ICON_NONE= gci_strip_ci_prefix ' x')"
 
+# gci_ttl_ms — the TTL must outlast the republish period (cycle + sleep), so it is derived
+# from the MEASURED cycle, not from the interval alone. Floor covers the first pass.
+check "ttl-floor"      "90000"  "$(gci_ttl_ms 0 30)"     # 3*(0+30)=90s -> floor
+check "ttl-floor-fast" "90000"  "$(gci_ttl_ms 0 1)"      # 3*(0+1)=3s -> floor wins
+check "ttl-measured"   "225000" "$(gci_ttl_ms 45 30)"    # 3*(45+30)=225s, the live cycle
+check "ttl-grows"      "450000" "$(gci_ttl_ms 120 30)"   # a slower cycle stretches the TTL
+
+# Token names are configurable: every plugin's tokens share one name space, so a user
+# whose other plugin already publishes `ci` must be able to move ours out of the way.
+check "tok-default-ci"  "ci"  "$(gci_token_name_ci)"
+check "tok-default-mr"  "mr"  "$(gci_token_name_mr)"
+check "tok-override-ci" "gci" "$(GITLAB_CI_TOKEN_CI=gci gci_token_name_ci)"
+check "tok-override-mr" "gpr" "$(GITLAB_CI_TOKEN_MR=gpr gci_token_name_mr)"
+
+# poll-once publishes tokens and NEVER renames — the whole point of the migration. The
+# fake workspace carries a label decorated by a pre-token version ("🟢 #12 proj"); the old
+# code would strip and re-apply it, the token version must leave the label alone.
+ttmp="$(mktemp -d)"
+cat > "$ttmp/herdr" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$TLOG"
+case "$1.$2" in
+  workspace.list) echo '{"result":{"workspaces":[{"workspace_id":"wT","label":"🟢 #12 proj"}]}}' ;;
+  pane.list)      echo '{"result":{"panes":[]}}' ;;
+esac
+exit 0
+STUB
+chmod +x "$ttmp/herdr"
+tctl() { env HERDR_PLUGIN_STATE_DIR="$ttmp/state" HERDR_PLUGIN_CONFIG_DIR="$ttmp" \
+             HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" GITLAB_CI_REFRESH=1 \
+             bash "$DIR/poller-ctl.sh" "$@"; }
+
+: > "$ttmp/log"; tctl poll-once >/dev/null 2>&1
+grep -q -- 'report-metadata wT --source gitlab-ci-status --token ci= --token mr= --seq' "$ttmp/log"
+check "poll-reports-both-tokens" "0" "$?"
+# Both tokens in ONE call: --seq is per (workspace, source), so a second call in the same
+# second would carry a seq <= the accepted one and be dropped.
+check "poll-single-report" "1" "$(grep -c 'report-metadata' "$ttmp/log")"
+grep -q -- '--ttl-ms 90000' "$ttmp/log"
+check "poll-ttl-floor-applied" "0" "$?"
+grep -q 'workspace rename' "$ttmp/log"
+check "poll-never-renames" "1" "$?"
+
+: > "$ttmp/log"; GITLAB_CI_TOKEN_CI=xci GITLAB_CI_TOKEN_MR=xmr tctl poll-once >/dev/null 2>&1
+grep -q -- '--token xci= --token xmr=' "$ttmp/log"
+check "poll-honors-token-names" "0" "$?"
+
+# restore — the migration path: clear our tokens AND strip the stale label decoration.
+: > "$ttmp/log"; tctl restore >/dev/null 2>&1
+grep -q -- 'report-metadata wT --source gitlab-ci-status --clear-token ci --clear-token mr' "$ttmp/log"
+check "restore-clears-tokens" "0" "$?"
+grep -q 'workspace rename wT proj' "$ttmp/log"
+check "restore-strips-label"  "0" "$?"
+rm -rf "$ttmp"
+
 # poller-ctl ensure — restart after unexpected death only
 etmp="$(mktemp -d)"
 printf '#!/bin/sh\necho "{\\"result\\":{\\"workspaces\\":[]}}"\n' > "$etmp/herdr"

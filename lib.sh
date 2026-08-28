@@ -351,6 +351,59 @@ gci_daemon_alive() {
   gci_pid_matches "$pid" "$pattern"
 }
 
+# --- sidebar metadata tokens -------------------------------------------------
+# The poller publishes its output as workspace metadata, not as a space label. A
+# label is one shared slot, so every plugin that writes it fights every other one
+# (and this plugin used to fight itself: it re-parsed its own prefix each poll).
+# Tokens are namespaced per --source and cannot clobber each other.
+#
+# herdr renders a token only if the user's ui.sidebar.spaces.rows asks for it by
+# name, and all plugins' tokens share one name space — hence the names are
+# configurable. Renaming one means editing rows to match.
+gci_token_name_ci() { printf '%s' "${GITLAB_CI_TOKEN_CI:-ci}"; }
+gci_token_name_mr() { printf '%s' "${GITLAB_CI_TOKEN_MR:-mr}"; }
+
+# gci_report_tokens <ws_id> <ci_value> <mr_value> <seq> <ttl_ms>
+# Both tokens go in ONE call. --seq is tracked per (workspace, source) and a report
+# whose seq is <= the last accepted one is silently ignored, so two calls in the same
+# second would lose the second one.
+# An empty value clears its token, which is what makes a set-but-empty
+# GITLAB_CI_ICON_* override hide that glyph rather than render a blank slot.
+gci_report_tokens() {
+  "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
+    --source gitlab-ci-status \
+    --token "$(gci_token_name_ci)=$2" \
+    --token "$(gci_token_name_mr)=$3" \
+    --seq "$4" \
+    --ttl-ms "$5" >/dev/null 2>&1
+}
+
+# gci_clear_tokens <ws_id> <seq> — drop both tokens now instead of waiting out the TTL.
+gci_clear_tokens() {
+  "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
+    --source gitlab-ci-status \
+    --clear-token "$(gci_token_name_ci)" \
+    --clear-token "$(gci_token_name_mr)" \
+    --seq "$2" >/dev/null 2>&1
+}
+
+# gci_ttl_ms <last_cycle_secs> <interval_secs>
+# Tokens carry a TTL so a dead daemon's dots expire on their own; herdr then emits
+# workspace.metadata_updated on expiry. That means the poller must republish every
+# tick, not only on change, or the sidebar blanks while a repo is quiet.
+#
+# The TTL therefore has to outlast the republish period, which is the poll cycle
+# PLUS the sleep — and the cycle is network-bound (measured 45s for 28 spaces), not
+# a constant, so it cannot be a fixed number. Self-tune from the previous cycle's
+# measured duration, with a floor covering the first pass (cycle unknown = 0).
+# ponytail: 3x headroom absorbs a couple of skipped ticks; the cost is that a
+# crashed daemon's tokens linger that long. `stop` clears them explicitly.
+gci_ttl_ms() {
+  local secs=$(( 3 * ($1 + $2) ))
+  [ "$secs" -lt 90 ] && secs=90
+  printf '%s' "$(( secs * 1000 ))"
+}
+
 # Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
 # terminals). Falls back to plain <text> when colors are disabled (NO_COLOR / not a
 # tty), so output stays deterministic in tests and pipes.

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Always-live poller: reflects each space's GitLab CI status as a colored dot
-# prefixed onto the space's label in the herdr sidebar. It never touches the
+# Always-live poller: publishes each space's CI status and MR/PR number as herdr
+# sidebar metadata tokens (`ci` and `mr`). It never touches space labels or the
 # agent status dot. Control: start | stop | toggle | ensure | status | poll-once | restore | run
 #
 # Env:
 #   GITLAB_CI_REFRESH   poll interval seconds (default 30)
-#   GITLAB_CI_DRYRUN    if set, print intended renames instead of applying them
+#   GITLAB_CI_DRYRUN    if set, print intended token reports instead of publishing them
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -17,7 +17,12 @@ STATE_DIR="${HERDR_PLUGIN_STATE_DIR:-$DIR/.state}"
 PIDFILE="$STATE_DIR/poller.pid"
 LOGFILE="$STATE_DIR/poller.log"
 INTERVAL="${GITLAB_CI_REFRESH:-30}"
+# A zero/garbage interval would make consecutive cycles share one epoch second, and a
+# report whose --seq repeats the last accepted one is silently dropped — so the sidebar
+# would freeze rather than poll fast. Clamp to the default instead.
+case "$INTERVAL" in ''|*[!0-9]*|0) INTERVAL=30 ;; esac
 DRYRUN="${GITLAB_CI_DRYRUN:-}"
+CYCLE_SECS=0          # duration of the last completed poll; 0 until one finishes
 START_HEAL_SECS="${GITLAB_CI_START_HEAL_SECS:-5}"   # `start` watches this long, relaunching if the daemon dies
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
@@ -68,28 +73,49 @@ status_for_repo() {
 # if the loop fed them via stdin they would consume it and truncate the loop after the
 # first space. The pane list is fetched once per poll and reused for all spaces.
 poll_once() {
-  local panes wsid label base cwd new
+  local panes wsid cwd seq ttl
   panes="$("$HERDR" pane list 2>/dev/null)"
-  while IFS=$'\t' read -r wsid label <&9; do
+  # seq is epoch seconds, NOT a per-start counter: herdr ignores a report whose seq is
+  # <= the last one accepted for this (workspace, source), so a counter restarting at 0
+  # would have every write after a daemon restart silently dropped. One seq per cycle is
+  # enough — the next cycle is at least INTERVAL seconds later.
+  seq="$(date +%s)"
+  ttl="$(gci_ttl_ms "$CYCLE_SECS" "$INTERVAL")"
+  while IFS=$'\t' read -r wsid _ <&9; do
     [ -n "$wsid" ] || continue
-    base="$(gci_strip_ci_prefix "$label")"
     # Resolve the space's repo from a real terminal pane, skipping plugin panes (e.g. the
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
     cwd="$(gci_pick_pane_cwd "$wsid" "$panes")"
     if [ -z "$cwd" ]; then SPACE_EMOJI=""; SPACE_MR=""; else status_for_repo "$cwd"; fi
+    # Transient API error: publish nothing and let the already-published value ride out
+    # its TTL, rather than blanking the sidebar over one failed call.
     [ "$SPACE_EMOJI" = "SKIP" ] && continue
-    new="$base"
-    [ -n "$SPACE_MR" ] && new="$SPACE_MR $new"            # "!123 dbt" / "#123 dbt"
-    [ -n "$SPACE_EMOJI" ] && new="$SPACE_EMOJI $new"      # "🟢 #123 dbt"
-    [ "$new" = "$label" ] && continue
     if [ -n "$DRYRUN" ]; then
-      printf 'would rename %s: %q -> %q\n' "$wsid" "$label" "$new"
+      printf 'would report %s: %s=%q %s=%q (ttl %sms)\n' \
+        "$wsid" "$(gci_token_name_ci)" "$SPACE_EMOJI" "$(gci_token_name_mr)" "$SPACE_MR" "$ttl"
     else
-      "$HERDR" workspace rename "$wsid" "$new" >/dev/null 2>&1
+      gci_report_tokens "$wsid" "$SPACE_EMOJI" "$SPACE_MR" "$seq" "$ttl"
     fi
   done 9< <(ws_list)
 }
 
+clear_tokens() {
+  local wsid seq
+  seq="$(date +%s)"
+  while IFS=$'\t' read -r wsid _ <&9; do
+    [ -n "$wsid" ] || continue
+    if [ -n "$DRYRUN" ]; then
+      printf 'would clear tokens %s\n' "$wsid"
+    else
+      gci_clear_tokens "$wsid" "$seq"
+    fi
+  done 9< <(ws_list)
+}
+
+# Migration only. Earlier versions of this plugin prepended the CI dot and the MR/PR
+# number to the space label; those decorations are inert now that the sidebar reads
+# tokens, and nothing else would ever remove them. Idempotent, so it is safe to run on
+# every daemon start as well as from `stop`/`restore`.
 restore_labels() {
   local wsid label base
   while IFS=$'\t' read -r wsid label <&9; do
@@ -118,10 +144,15 @@ case "${1:-status}" in
   run)
     echo $$ > "$PIDFILE"
     trap 'exit 0' TERM INT
+    restore_labels     # one-shot cleanup of decorations left by pre-token versions
     # Loop only while we remain the registered owner: `stop` removes the pidfile and
     # a newer `start` overwrites it, so any stale/duplicate daemon self-exits.
     while [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ]; do
+      _t0=$SECONDS
       poll_once
+      # Feeds the next cycle's self-tuned TTL. Measured, not assumed: the cycle is
+      # network-bound and grows with the number of spaces.
+      CYCLE_SECS=$(( SECONDS - _t0 ))
       sleep "$INTERVAL"
     done
     ;;
@@ -151,8 +182,9 @@ case "${1:-status}" in
         kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
       fi
     fi
+    clear_tokens
     restore_labels
-    echo "poller stopped; labels restored"
+    echo "poller stopped; tokens cleared"
     ;;
   toggle)
     if is_running; then exec bash "$DIR/poller-ctl.sh" stop; else exec bash "$DIR/poller-ctl.sh" start; fi
@@ -166,6 +198,6 @@ case "${1:-status}" in
     if is_running; then echo "running (pid $(cat "$PIDFILE"))"; else echo "stopped"; fi
     ;;
   poll-once) poll_once ;;
-  restore)   restore_labels ;;
+  restore)   clear_tokens; restore_labels ;;
   *) echo "usage: poller-ctl.sh start|stop|toggle|ensure|status|poll-once|restore" >&2; exit 2 ;;
 esac
