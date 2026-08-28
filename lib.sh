@@ -110,16 +110,30 @@ gci_relative_time() {
   else printf '%dd ago\n' "$(( diff / 86400 ))"; fi
 }
 
-# CI status -> a single dot glyph (for the spaces sidebar label). Each glyph is
-# overridable via GITLAB_CI_ICON_* (.env or environment); a var that is set but
-# EMPTY hides the glyph — hence ${VAR-default}, not ${VAR:-default}.
-gci_status_emoji() {
+# Canonical CI status -> one of ok | fail | run | none.
+# The sidebar publishes a SEPARATE token per bucket, because herdr's token style is
+# static config ({ token, fg, bold, dim }) with no conditional form: one token cannot
+# change colour by state, so the state has to live in the token NAME for the user's
+# rows to be able to colour it.
+gci_status_bucket() {
   case "$1" in
-    success)  printf '%s' "${GITLAB_CI_ICON_OK-🟢}" ;;
-    failed)   printf '%s' "${GITLAB_CI_ICON_FAIL-🔴}" ;;
+    success)  printf 'ok' ;;
+    failed)   printf 'fail' ;;
     running|pending|created|preparing|waiting_for_resource|scheduled)
-              printf '%s' "${GITLAB_CI_ICON_RUN-🟡}" ;;
-    *)        printf '%s' "${GITLAB_CI_ICON_NONE-⚪}" ;;
+              printf 'run' ;;
+    *)        printf 'none' ;;
+  esac
+}
+
+# CI status -> a single dot glyph. Each glyph is overridable via GITLAB_CI_ICON_*
+# (.env or environment); a var that is set but EMPTY hides the glyph — hence
+# ${VAR-default}, not ${VAR:-default}.
+gci_status_emoji() {
+  case "$(gci_status_bucket "$1")" in
+    ok)   printf '%s' "${GITLAB_CI_ICON_OK-🟢}" ;;
+    fail) printf '%s' "${GITLAB_CI_ICON_FAIL-🔴}" ;;
+    run)  printf '%s' "${GITLAB_CI_ICON_RUN-🟡}" ;;
+    *)    printf '%s' "${GITLAB_CI_ICON_NONE-⚪}" ;;
   esac
 }
 
@@ -167,6 +181,15 @@ gci_github_checks_status() {
     if [ "$p" -gt "$bp" ]; then bp=$p; best="$s$tab$rest"; fi
   done
   printf '%s' "$best"
+}
+
+# Canonical CI status -> the sidebar cell: "CI <glyph>". Labelling the cell means the
+# glyph is not the only thing identifying what it means. A glyph hidden by a set-but-empty
+# GITLAB_CI_ICON_* stays fully hidden — a bare "CI" with no state would be noise.
+gci_ci_cell() {
+  local g
+  g="$(gci_status_emoji "$1")"
+  [ -n "$g" ] && printf 'CI %s' "$g"
 }
 
 # Canonical review state -> glyph (full vocabulary; used by the My-MRs pane and tests).
@@ -357,33 +380,50 @@ gci_daemon_alive() {
 # (and this plugin used to fight itself: it re-parsed its own prefix each poll).
 # Tokens are namespaced per --source and cannot clobber each other.
 #
-# herdr renders a token only if the user's ui.sidebar.spaces.rows asks for it by
-# name, and all plugins' tokens share one name space — hence the names are
-# configurable. Renaming one means editing rows to match.
-gci_token_name_ci() { printf '%s' "${GITLAB_CI_TOKEN_CI:-ci}"; }
-gci_token_name_mr() { printf '%s' "${GITLAB_CI_TOKEN_MR:-mr}"; }
+# herdr renders a token only if the user's ui.sidebar.spaces.rows asks for it by name,
+# and every plugin's tokens share ONE name space. GITLAB_CI_TOKEN_PREFIX moves all of
+# ours out of the way of a colliding plugin in one setting; the prefix must be mirrored
+# in rows.
+GCI_TOKEN_SUFFIXES='ci_ok ci_fail ci_run ci_none review mr'
+gci_token_name() { printf '%s' "${GITLAB_CI_TOKEN_PREFIX:-}$1"; }
 
-# gci_report_tokens <ws_id> <ci_value> <mr_value> <seq> <ttl_ms>
-# Both tokens go in ONE call. --seq is tracked per (workspace, source) and a report
-# whose seq is <= the last accepted one is silently ignored, so two calls in the same
-# second would lose the second one.
-# An empty value clears its token, which is what makes a set-but-empty
+# gci_report_tokens <ws_id> <bucket> <ci_value> <review_value> <mr_value> <seq> <ttl_ms>
+# <bucket> is a gci_status_bucket result, or "" for "no CI state at all".
+#
+# Every token goes in ONE call. --seq is tracked per (workspace, source) and a report
+# whose seq is <= the last accepted one is silently ignored, so a second call in the
+# same second would be lost.
+#
+# The CI value is published under the bucket's token and the other three buckets are
+# sent EMPTY, which clears them — that is what keeps exactly one CI token live per
+# space as the state changes, so the user's per-state `fg` colours it.
+# An empty value clearing its token is also what makes a set-but-empty
 # GITLAB_CI_ICON_* override hide that glyph rather than render a blank slot.
 gci_report_tokens() {
-  "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
+  local wsid="$1" bucket="$2" ci="$3" review="$4" mr="$5" seq="$6" ttl="$7" b
+  local -a args=()
+  for b in ok fail run none; do
+    if [ "$b" = "$bucket" ]; then args+=(--token "$(gci_token_name "ci_$b")=$ci")
+    else                         args+=(--token "$(gci_token_name "ci_$b")=")
+    fi
+  done
+  args+=(--token "$(gci_token_name review)=$review")
+  args+=(--token "$(gci_token_name mr)=$mr")
+  "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$wsid" \
     --source gitlab-ci-status \
-    --token "$(gci_token_name_ci)=$2" \
-    --token "$(gci_token_name_mr)=$3" \
-    --seq "$4" \
-    --ttl-ms "$5" >/dev/null 2>&1
+    "${args[@]}" \
+    --seq "$seq" \
+    --ttl-ms "$ttl" >/dev/null 2>&1
 }
 
-# gci_clear_tokens <ws_id> <seq> — drop both tokens now instead of waiting out the TTL.
+# gci_clear_tokens <ws_id> <seq> — drop every token now instead of waiting out the TTL.
 gci_clear_tokens() {
+  local sfx
+  local -a args=()
+  for sfx in $GCI_TOKEN_SUFFIXES; do args+=(--clear-token "$(gci_token_name "$sfx")"); done
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
     --source gitlab-ci-status \
-    --clear-token "$(gci_token_name_ci)" \
-    --clear-token "$(gci_token_name_mr)" \
+    "${args[@]}" \
     --seq "$2" >/dev/null 2>&1
 }
 

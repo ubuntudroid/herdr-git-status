@@ -4,12 +4,12 @@ Surfaces CI status inside herdr — for both **GitLab** (pipelines + merge reque
 **GitHub** (check runs + pull requests via `gh`), auto-detected from each repo's `origin` host — two
 ways:
 
-1. **Live status dots in the spaces sidebar** — a background poller publishes two **metadata tokens**
-   per space: `ci`, a colored dot for the current branch's latest CI run (🟢 passed · 🟡 running ·
-   🔴 failed · ⚪ none), and `mr`, the open request number (`!123` for a GitLab MR, `#123` for a
-   GitHub PR) when the branch has one. Your space labels are never touched, and neither is the agent
-   status dot. Tokens render only where your sidebar layout asks for them — see
-   [Configure the sidebar](#configure-the-sidebar), which is a required one-time step.
+1. **Live status dots in the spaces sidebar** — a background poller publishes **metadata tokens**
+   per space: the CI cell `CI <glyph>` (🟢 passed · 🟡 running · 🔴 failed · ⚪ none), the
+   review-state glyph, and the request number (`!123` for a GitLab MR, `#123` for a GitHub PR).
+   Your space labels are never touched, and neither is the agent status dot. Tokens render only
+   where your sidebar layout asks for them — see [Configure the sidebar](#configure-the-sidebar),
+   which is a required one-time step.
 2. **An on-demand detail pane** — project, current branch, the latest pipeline/run status,
    the open MR/PR, and a list of the most recent **failed** pipelines/runs for the branch
    (up to 5). The project path, each run/pipeline `#id`, and the `!123`/`#123` are clickable
@@ -87,32 +87,40 @@ herdr plugin list        # confirm "gitlab-ci-status" is registered
 
 ## Configure the sidebar
 
-**Required, once.** The plugin publishes the `ci` and `mr` tokens, but herdr renders a token only
-if your layout asks for it by name — so until you add them, the poller runs and nothing appears.
-Add them to `~/.config/herdr/config.toml` and run `herdr server reload-config`:
+**Required, once.** herdr renders a token only if your layout asks for it by name — so until you
+add these, the poller runs and nothing appears. Add them to `~/.config/herdr/config.toml` and run
+`herdr server reload-config`:
 
 ```toml
 [ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
-  [{ token = "$ci" }, { token = "$mr" }, "branch", "git_status"],
+  [{ token = "$ci_ok",   fg = "#9ece6a" },      # your theme's green
+   { token = "$ci_fail", fg = "#f7768e" },      # …red
+   { token = "$ci_run",  fg = "#e0af68" },      # …yellow
+   { token = "$ci_none", dim = true },
+   { token = "$review" }, { token = "$mr" },
+   "branch", "git_status"],
 ]
 ```
 
-Both rows here are herdr's defaults plus the two tokens; keep whatever you already have. Tokens
-can go on any row — put them on the first row instead if you want the dot next to the space name.
+**Why four CI tokens.** herdr's token style is static config — `{ token, fg, bold, dim }`, with no
+conditional form — so one token cannot change colour by state. The state therefore lives in the
+token *name*: the poller publishes the CI cell under exactly one of `ci_ok` / `ci_fail` / `ci_run` /
+`ci_none` and clears the other three, so only one of those four row entries ever renders. Drop the
+`fg`s and a single `{ token = "$ci_ok" }`…`{ token = "$ci_none" }` set still works, just uncoloured.
 
-A bare `{ token = "$ci" }` renders in your theme's normal foreground, which is usually what you
-want: the status colour is already in the glyph. An inline style table also accepts `bold`/`dim`
-and an `fg`, but `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme
-colour names there — so setting it pins that token to one colour across every theme.
+`fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
+paste your own theme's hex rather than the values above. A bare `{ token = "$review" }` with no
+`fg` follows the theme foreground, which is what you want for glyphs that are already meaningful.
 
-A row whose every entry is empty is not rendered at all. Putting the tokens on the second row
-therefore makes that row appear on spaces that previously had nothing to show there.
+Tokens can go on any row, in any order — put them on the first row if you want them next to the
+space name. A row whose every entry is empty is not rendered at all, so adding tokens to a row can
+make that row appear on spaces that previously had nothing to show there.
 
-If another plugin already publishes a token called `ci` or `mr`, rename ours with
-`GITLAB_CI_TOKEN_CI` / `GITLAB_CI_TOKEN_MR` (see [Configuration](#configuration)) and use the new
-names in `rows` — token names are a single shared namespace across all plugins.
+If another plugin already publishes a token with one of these names, set
+`GITLAB_CI_TOKEN_PREFIX` (see [Configuration](#configuration)) and use the prefixed names in
+`rows` — token names are a single shared namespace across all plugins.
 
 ## Keybindings (one-time setup)
 
@@ -141,8 +149,8 @@ command = "herdr plugin action invoke gitlab-ci-status.open-mr"
 
 ## Usage
 
-**Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space gets its `ci`
-and `mr` tokens refreshed every 30s. Toggling off (or `herdr plugin action invoke
+**Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space gets its
+tokens refreshed every 30s. Toggling off (or `herdr plugin action invoke
 gitlab-ci-status.stop`) clears them immediately. Tokens also carry a TTL, so if the daemon is
 killed or the machine reboots they expire on their own within a few minutes.
 
@@ -226,9 +234,10 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
 - `GITLAB_CI_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
   (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot, e.g.
   `GITLAB_CI_ICON_NONE=` shows nothing when a branch has no pipeline.
-- `GITLAB_CI_TOKEN_CI` / `GITLAB_CI_TOKEN_MR` — sidebar token names (defaults `ci` and `mr`).
-  Change these only to avoid a collision with another plugin, and mirror the change in
-  `ui.sidebar.spaces.rows`.
+- `GITLAB_CI_TOKEN_PREFIX` — prepended to every sidebar token name (`ci_ok`, `ci_fail`, `ci_run`,
+  `ci_none`, `review`, `mr`). Token names are one namespace shared by all plugins, so set this if
+  another plugin already publishes one of those names — then mirror the prefix in
+  `ui.sidebar.spaces.rows`. Default empty.
 - `GITLAB_CI_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
   review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). The sidebar badge only ever shows
   conflict/changes/approved/merged; draft/awaiting appear in the My MRs pane.
@@ -265,13 +274,15 @@ glab/gh supply authentication and the host; the plugin stores no tokens of its o
 
 The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actions) loops every
 `GITLAB_CI_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
-latest run and open MR/PR the same way, maps the status to a dot, and publishes both values with
-`herdr workspace report-metadata --source gitlab-ci-status --token ci=… --token mr=…`. Labels are
-never written, so this plugin cannot collide with another that decorates them.
+latest run and open MR/PR the same way, and publishes the result with
+`herdr workspace report-metadata --source gitlab-ci-status --token …`. Labels are never written, so
+this plugin cannot collide with another that decorates them.
 
-Both tokens go in one call, because `--seq` is tracked per (workspace, source) and a report whose
+Every token goes in one call, because `--seq` is tracked per (workspace, source) and a report whose
 seq is not greater than the last accepted one is silently ignored. The seq is epoch seconds rather
-than a per-start counter, so a daemon restart does not start emitting values herdr will drop.
+than a per-start counter, so a daemon restart does not start emitting values herdr will drop. The CI
+cell is published under the current state's `ci_*` token and the other three are sent empty, which
+clears them — that is how exactly one CI token stays live per space as the state changes.
 
 Tokens carry a TTL and herdr expires them itself, which is why the poller republishes every tick
 rather than only on change — publishing on change alone would let the sidebar blank while a repo is

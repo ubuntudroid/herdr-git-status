@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Always-live poller: publishes each space's CI status and MR/PR number as herdr
-# sidebar metadata tokens (`ci` and `mr`). It never touches space labels or the
+# sidebar metadata tokens (`ci_*`, `review`, `mr`). It never touches space labels or the
 # agent status dot. Control: start | stop | toggle | ensure | status | poll-once | restore | run
 #
 # Env:
@@ -32,38 +32,36 @@ ws_list() {
     | jq -r '(.result.workspaces // .workspaces // .)[] | "\(.workspace_id)\t\(.label)"'
 }
 
-# Resolve a repo's sidebar decoration into globals (NOT stdout) so it can run
-# without a subshell — that lets the MR/PR lookup reuse the path/branch/provider
-# that gci_latest_ci just resolved:
-#   SPACE_EMOJI  status emoji, "" (unsupported remote), or "SKIP" (transient error)
-#   SPACE_MR     open MR/PR token incl. sigil ("!123" / "#123") or "" (none)
+# Resolve a repo's sidebar state into globals (NOT stdout) so it can run without a
+# subshell — that lets the MR/PR lookup reuse the path/branch/provider that
+# gci_latest_ci just resolved:
+#   SPACE_BUCKET  ok|fail|run|none, "" (unsupported remote), or "SKIP" (transient error)
+#   SPACE_CI      the CI cell, "CI <glyph>", or "" when the glyph is hidden
+#   SPACE_REVIEW  review-state glyph, or "" (nothing to flag)
+#   SPACE_MR      open/merged MR/PR number incl. sigil ("!123" / "#123") or "" (none)
+# Review state is its own token, not glued to the number: they are separate facts and
+# the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
-  local cwd="$1" rc glyph
-  SPACE_EMOJI=""; SPACE_MR=""
+  local cwd="$1" rc
+  SPACE_BUCKET=""; SPACE_CI=""; SPACE_REVIEW=""; SPACE_MR=""
   gci_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
-    5)       SPACE_EMOJI="SKIP"; return ;;
+    5)       SPACE_BUCKET="SKIP"; return ;;
     0)
-      if [ -n "$GCI_STATUS" ]; then
-        SPACE_EMOJI="$(gci_status_emoji "$GCI_STATUS")"
-      else
-        SPACE_EMOJI="$(gci_status_emoji '')"   # supported remote, but no pipeline/run for this branch
-      fi
+      # An empty $GCI_STATUS (supported remote, no pipeline/run for this branch) buckets
+      # as "none" on its own, so it needs no separate branch here.
+      SPACE_BUCKET="$(gci_status_bucket "$GCI_STATUS")"
+      SPACE_CI="$(gci_ci_cell "$GCI_STATUS")"
       # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
       # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
       # here (not inside the old `if gci_open_pr`) because a merged PR returns rc 3 by definition,
       # so gluing it to the open-PR success path would make it unreachable in the case it covers.
       gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; rc=$?
-      if [ "$rc" -eq 0 ]; then
-        gci_review_for_mr "$cwd" "$GCI_MR_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
-        glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
+      if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gci_merged_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; }; then
+        [ "$rc" -eq 0 ] && gci_review_for_mr "$cwd" "$GCI_MR_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
+        SPACE_REVIEW="$(gci_review_badge_glyph "$GCI_REVIEW")"
         SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
-        [ -n "$glyph" ] && SPACE_MR="$glyph $SPACE_MR"   # "✅ #123", plain "#123" with no glyph
-      elif [ "$rc" -eq 3 ] && gci_merged_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; then
-        glyph="$(gci_review_badge_glyph "$GCI_REVIEW")"
-        SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
-        [ -n "$glyph" ] && SPACE_MR="$glyph $SPACE_MR"
       fi
       ;;
   esac
@@ -86,15 +84,19 @@ poll_once() {
     # Resolve the space's repo from a real terminal pane, skipping plugin panes (e.g. the
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
     cwd="$(gci_pick_pane_cwd "$wsid" "$panes")"
-    if [ -z "$cwd" ]; then SPACE_EMOJI=""; SPACE_MR=""; else status_for_repo "$cwd"; fi
+    if [ -z "$cwd" ]; then
+      SPACE_BUCKET=""; SPACE_CI=""; SPACE_REVIEW=""; SPACE_MR=""
+    else
+      status_for_repo "$cwd"
+    fi
     # Transient API error: publish nothing and let the already-published value ride out
     # its TTL, rather than blanking the sidebar over one failed call.
-    [ "$SPACE_EMOJI" = "SKIP" ] && continue
+    [ "$SPACE_BUCKET" = "SKIP" ] && continue
     if [ -n "$DRYRUN" ]; then
-      printf 'would report %s: %s=%q %s=%q (ttl %sms)\n' \
-        "$wsid" "$(gci_token_name_ci)" "$SPACE_EMOJI" "$(gci_token_name_mr)" "$SPACE_MR" "$ttl"
+      printf 'would report %s: ci_%s=%q review=%q mr=%q (ttl %sms)\n' \
+        "$wsid" "${SPACE_BUCKET:-none}" "$SPACE_CI" "$SPACE_REVIEW" "$SPACE_MR" "$ttl"
     else
-      gci_report_tokens "$wsid" "$SPACE_EMOJI" "$SPACE_MR" "$seq" "$ttl"
+      gci_report_tokens "$wsid" "$SPACE_BUCKET" "$SPACE_CI" "$SPACE_REVIEW" "$SPACE_MR" "$seq" "$ttl"
     fi
   done 9< <(ws_list)
 }
