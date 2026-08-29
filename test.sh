@@ -185,14 +185,13 @@ GH_FIXTURE="$PR_HEAD$ROLLUP}}}}"
 gci_review_for_mr "$DIR" myorg/app 1 github
 check "reqnames-only-required" "$(printf 'django-test\nmigrations-checks')" "$GCI_REQUIRED_NAMES"
 
-# A required legacy StatusContext disables filtering: REST commits/<sha>/check-runs returns
-# check runs ONLY, so filtering by name would drop a failing required status and show green
-# while the merge is blocked. Empty = fall back to counting everything.
+# A required legacy StatusContext is keyed on .context and is included like any check run —
+# the CI verdict comes from the same rollup, which carries commit statuses too.
 GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
   {"__typename":"CheckRun","name":"django-test","isRequired":true},
   {"__typename":"StatusContext","context":"ci/legacy","isRequired":true}]}}}}]}}}}}'
 gci_review_for_mr "$DIR" myorg/app 1 github
-check "reqnames-statuscontext-guard" "" "$GCI_REQUIRED_NAMES"
+check "reqnames-statuscontext-included" "$(printf 'django-test\nci/legacy')" "$GCI_REQUIRED_NAMES"
 # A NON-required StatusContext is harmless — filtering still applies.
 GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
   {"__typename":"CheckRun","name":"django-test","isRequired":true},
@@ -352,13 +351,13 @@ git -C "$sht" remote add origin git@github.com:acme/web-app.git
 git -C "$sht" -c user.email=t@t -c user.name=t commit --allow-empty -q -m one
 git -C "$sht" -c user.email=t@t -c user.name=t commit --allow-empty -q -m two
 shead="$(git -C "$sht" rev-parse HEAD)"
-gh() { printf '%s\n' "$*" >> "$GHLOG"; printf '{"check_runs":[]}'; }
+gh() { printf '%s\n' "$*" >> "$GHLOG"; printf '{"data":{"repository":{"object":null}}}'; }
 
 : > "$sht/log"; GHLOG="$sht/log" gci_latest_ci "$sht"
 check "sha-branch-resolved"  "feature/x" "$GCI_BRANCH"
-grep -q "commits/$shead/check-runs" "$sht/log"
+grep -q "oid=$shead" "$sht/log"
 check "sha-queries-head-sha" "0" "$?"
-grep -q 'commits/feature/x/' "$sht/log"
+grep -q 'feature/x' "$sht/log"
 check "sha-never-branch-name" "1" "$?"
 
 # Detached HEAD: the branch name becomes the literal "HEAD", which the forge would resolve to
@@ -367,9 +366,9 @@ git -C "$sht" checkout -q --detach HEAD~1
 sdet="$(git -C "$sht" rev-parse HEAD)"
 : > "$sht/log"; GHLOG="$sht/log" gci_latest_ci "$sht"
 check "sha-detached-branch"  "HEAD" "$GCI_BRANCH"
-grep -q "commits/$sdet/check-runs" "$sht/log"
+grep -q "oid=$sdet" "$sht/log"
 check "sha-detached-uses-sha" "0" "$?"
-grep -q 'commits/HEAD/' "$sht/log"
+grep -q 'oid=HEAD' "$sht/log"
 check "sha-detached-not-ref"  "1" "$?"
 unset -f gh
 
@@ -386,19 +385,51 @@ check "sha-gitlab-not-ref"   "1" "$?"
 unset -f glab
 rm -rf "$sht"
 
+# The CI verdict comes from GitHub's OWN statusCheckRollup, not from re-aggregating the raw
+# check-run list. That is what fixes the case this was written for: on
+# Photoroom/photoroom_android@258810c two SCHEDULED workflows (a nightly testing build and a
+# Gradle cache warmer) failed against the commit, so aggregating all 27 raw check runs said
+# "failed" while GitHub's tick was green — the rollup carries only the 14 runs from the push
+# that produced the commit. Re-run attempts collapse the same way.
+# Pinned by feeding a response that carries BOTH shapes with opposite verdicts:
+BOTH='{"check_runs":[{"name":"nightly","status":"completed","conclusion":"failure","id":9,"html_url":"u","completed_at":"t"}],
+  "data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"nodes":[
+    {"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","databaseId":1,"detailsUrl":"u1","completedAt":"t1"}]}}}}}}'
+check "rollup-wins-over-raw" "success" "$(printf '%s' "$BOTH" \
+  | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" | gci_github_checks_status | cut -f1)"
+
+# GraphQL enums arrive upper-case and must map onto the canonical vocabulary.
+mkctx() { printf '{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"nodes":[%s]}}}}}}' "$1"; }
+rollup_status() { printf '%s' "$1" | jq -r --arg req "${2:-}" "$GCI_ROLLUP_TSV_JQ" | gci_github_checks_status | cut -f1; }
+check "rollup-enum-failure"  "failed"  "$(rollup_status "$(mkctx '{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"FAILURE"}')")"
+check "rollup-enum-progress" "running" "$(rollup_status "$(mkctx '{"__typename":"CheckRun","name":"a","status":"IN_PROGRESS","conclusion":null}')")"
+check "rollup-enum-queued"   "pending" "$(rollup_status "$(mkctx '{"__typename":"CheckRun","name":"a","status":"QUEUED","conclusion":null}')")"
+check "rollup-enum-cancel"   "canceled" "$(rollup_status "$(mkctx '{"__typename":"CheckRun","name":"a","status":"COMPLETED","conclusion":"CANCELLED"}')")"
+check "rollup-empty"         ""        "$(rollup_status '{"data":{"repository":{"object":null}}}')"
+
+# Legacy commit statuses (StatusContext) are part of the rollup and must aggregate like check
+# runs — keyed on .context, since they have no .name. Before the rollup switch the plugin read
+# an endpoint that could not see them at all.
+check "rollup-statusctx-fail"    "failed"  "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE"}')")"
+check "rollup-statusctx-error"   "failed"  "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"ERROR"}')")"
+check "rollup-statusctx-pending" "running" "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"PENDING"}')")"
+check "rollup-statusctx-ok"      "success" "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"SUCCESS"}')")"
+# ...and they filter by name like check runs, so a required legacy status is no longer invisible:
+check "rollup-statusctx-filter"  "failed"  "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE"},{"__typename":"CheckRun","name":"opt","status":"COMPLETED","conclusion":"SUCCESS"}')" "ci/legacy")"
+check "rollup-statusctx-excluded" "success" "$(rollup_status "$(mkctx '{"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE"},{"__typename":"CheckRun","name":"opt","status":"COMPLETED","conclusion":"SUCCESS"}')" "opt")"
+
 # gci_required_status — only merge-guarding checks decide the CI cell. Modelled on
 # Photoroom/content_backend#3397, where "lint / pre_commit" failed while all three required
 # checks passed, turning the whole space red for something that could not block the merge.
-CR_JSON='{"check_runs":[
-  {"name":"django-test","status":"completed","conclusion":"success","id":1,"html_url":"u1","completed_at":"t1"},
-  {"name":"lint / pre_commit","status":"completed","conclusion":"failure","id":2,"html_url":"u2","completed_at":"t2"},
-  {"name":"fastapi-test","status":"completed","conclusion":"skipped","id":3,"html_url":"u3","completed_at":"t3"},
-  {"name":"migrations-checks","status":"completed","conclusion":"success","id":4,"html_url":"u4","completed_at":"t4"}]}'
+CR_JSON='{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"django-test","status":"COMPLETED","conclusion":"SUCCESS","databaseId":1,"detailsUrl":"u1","completedAt":"t1"},
+  {"__typename":"CheckRun","name":"lint / pre_commit","status":"COMPLETED","conclusion":"FAILURE","databaseId":2,"detailsUrl":"u2","completedAt":"t2"},
+  {"__typename":"CheckRun","name":"fastapi-test","status":"COMPLETED","conclusion":"SKIPPED","databaseId":3,"detailsUrl":"u3","completedAt":"t3"},
+  {"__typename":"CheckRun","name":"migrations-checks","status":"COMPLETED","conclusion":"SUCCESS","databaseId":4,"detailsUrl":"u4","completedAt":"t4"}]}}}}}}'
 REQ_3="$(printf 'django-test\nfastapi-test\nmigrations-checks')"
 # Unfiltered, the failing optional lint wins:
 check "req-unfiltered" "failed" "$(printf '%s' "$CR_JSON" \
-  | jq -r '.check_runs[]|[.status,.conclusion//"",(.id|tostring),.html_url//"",(.completed_at//"")]|@tsv' \
-  | gci_github_checks_status | cut -f1)"
+  | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" | gci_github_checks_status | cut -f1)"
 # Filtered to the merge guards, it does not — and a SKIPPED required check does not veto,
 # matching GitHub's merge box:
 check "req-filtered"   "success" "$(gci_required_status "$CR_JSON" "$REQ_3" | cut -f1)"
@@ -412,15 +443,15 @@ check "req-absent"     ""        "$(gci_required_status "$CR_JSON" "not-run-here
 # A name is matched whole, not as a substring — "test" must not match "django-test".
 check "req-exact-name" ""        "$(gci_required_status "$CR_JSON" "test")"
 
-# gci_latest_ci (github) — a branch missing on the remote (deleted on merge, or not pushed
-# yet) makes commits/<ref>/check-runs fail with HTTP 422 "No commit found for SHA". That is
+# gci_latest_ci (github) — a commit the remote does not have (never pushed, or force-pushed
+# away) comes back from the rollup query as a NULL object with a successful call. That is
 # "no CI" (rc 0, empty status), NOT a transient api-error (rc 5): rc 5 makes the poller SKIP
-# the workspace forever, freezing a stale label and never applying the merged badge.
+# the workspace, freezing whatever it last published.
 lct="$(mktemp -d)"
 git -C "$lct" init -q
 git -C "$lct" remote add origin git@github.com:acme/web-app.git
 git -C "$lct" -c user.email=t@t -c user.name=t commit --allow-empty -q -m x
-gh() { printf 'gh: No commit found for SHA: gone-branch (HTTP 422)'; return 1; }
+gh() { printf '{"data":{"repository":{"object":null}}}'; }
 gci_latest_ci "$lct"
 check "ci-deleted-branch-rc"     "0" "$?"
 check "ci-deleted-branch-status" ""  "$GCI_STATUS"

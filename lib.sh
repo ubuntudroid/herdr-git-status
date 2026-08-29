@@ -501,7 +501,7 @@ gci_upstream_path() {
 #   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable
 #   4 unsupported-host (not GitLab/GitHub) | 5 api-error (incl. missing provider CLI)
 gci_latest_ci() {
-  local repo="$1" url parsed enc resp run up sha
+  local repo="$1" url parsed enc resp run up sha owner name
   GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
   GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""; GCI_CI_RESP=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
@@ -542,18 +542,17 @@ gci_latest_ci() {
     GCI_CI_UPDATED="$(printf '%s' "$run" | jq -r '.updated_at // empty')"
   else
     command -v gh >/dev/null 2>&1 || { GCI_ERR="gh not found — install it (brew install gh) and run: gh auth login"; return 5; }
-    # Aggregate ALL check runs on the branch head (what the PR page shows) — a push can
-    # trigger several workflows, and sampling one run (e.g. a skip-conditioned workflow)
-    # misreports CI that is actually green/running. The winning run supplies id/url/updated.
-    if ! resp="$(cd "$repo" && gh api "repos/$GCI_PATH/commits/$sha/check-runs?per_page=100" 2>&1)"; then
-      # A branch that isn't on the remote (yet, or anymore) simply has no CI to report.
-      # This endpoint answers 422 "No commit found for SHA" for an unresolvable ref (404
-      # only covers a missing repo), and merged branches are typically auto-deleted.
-      case "$resp" in *"HTTP 404"*|*"HTTP 422"*) return 0 ;; esac
+    # Read GitHub's OWN status-check rollup for the commit rather than re-aggregating the raw
+    # check-run list: the rollup is what the green tick reflects, so it already collapses
+    # re-run attempts and drops suites not triggered by the push. The winning context still
+    # supplies id/url/updated for the detail pane.
+    owner="${GCI_PATH%%/*}"; name="${GCI_PATH#*/}"
+    if ! resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -f oid="$sha" -f query="$GCI_ROLLUP_QUERY" 2>&1)"; then
       GCI_ERR="$resp"; return 5
     fi
-    run="$(printf '%s' "$resp" \
-      | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
+    # A commit the remote does not have (never pushed, or force-pushed away) comes back as a
+    # null object rather than an error — that is "no CI", not a failure to report.
+    run="$(printf '%s' "$resp" | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
       | gci_github_checks_status)"
     # Keep the response that produced $run: gci_required_status re-aggregates it with a
     # merge-guard filter, and re-fetching would double this plugin's API cost.
@@ -566,9 +565,8 @@ gci_latest_ci() {
     # name instead reported upstream's own same-named branch as this checkout's CI — seen
     # live on a fork whose own main had no CI at all, yet showed green.)
     if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
-      resp="$(cd "$repo" && gh api "repos/$up/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
-        && run="$(printf '%s' "$resp" \
-          | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \
+      resp="$(cd "$repo" && gh api graphql -f owner="${up%%/*}" -f name="${up#*/}" -f oid="$sha" -f query="$GCI_ROLLUP_QUERY" 2>/dev/null)" \
+        && run="$(printf '%s' "$resp" | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
           | gci_github_checks_status)" \
         && [ -n "$run" ] && { GCI_CI_PATH="$up"; GCI_CI_RESP="$resp"; } || true
     fi
@@ -578,7 +576,49 @@ gci_latest_ci() {
   return 0
 }
 
-# gci_required_status <check_runs_json> <required_names>
+# jq program mapping a statusCheckRollup response to the TSV gci_github_checks_status reads
+# ("status \t conclusion \t id \t url \t updated"), optionally filtered to $req names.
+#
+# The rollup is GitHub's OWN aggregation — the same set its green tick reflects — so using it
+# inherits two rules this plugin used to get wrong by re-implementing them over the raw
+# commits/<sha>/check-runs list: re-run attempts are collapsed to the latest per check, and
+# suites whose workflow run was NOT triggered by the push are excluded. The second one
+# mattered: a nightly `schedule` workflow failing against a commit turned that space red
+# while GitHub showed green, because the failure says nothing about the commit.
+#
+# StatusContexts (legacy commit statuses) are mapped too, keyed on .context instead of .name,
+# so they aggregate and filter exactly like check runs.
+GCI_ROLLUP_QUERY='
+  query($owner:String!,$name:String!,$oid:GitObjectID!){
+    repository(owner:$owner,name:$name){
+      object(oid:$oid){ ... on Commit {
+        statusCheckRollup { contexts(first:100){ nodes {
+          __typename
+          ... on CheckRun     { name    status conclusion databaseId detailsUrl completedAt startedAt }
+          ... on StatusContext{ context state targetUrl createdAt }
+        } } }
+      } }
+    }
+  }'
+
+GCI_ROLLUP_TSV_JQ='
+  def cell:
+    if .__typename == "CheckRun" then
+      [ ((.status // "") | ascii_downcase), ((.conclusion // "") | ascii_downcase),
+        ((.databaseId // "") | tostring), (.detailsUrl // ""), (.completedAt // .startedAt // "") ]
+    else
+      [ (if (.state // "") == "PENDING" or (.state // "") == "EXPECTED" then "in_progress" else "completed" end),
+        (if (.state // "") == "SUCCESS" then "success"
+         elif (.state // "") == "FAILURE" or (.state // "") == "ERROR" then "failure"
+         else "" end),
+        "", (.targetUrl // ""), (.createdAt // "") ]
+    end;
+  ($req | split("\n") | map(select(length > 0))) as $names
+  | (.data.repository.object.statusCheckRollup.contexts.nodes // [])
+  | map(select($names == [] or ((.name // .context) as $n | ($names | index($n)) != null)))
+  | .[] | cell | @tsv'
+
+# gci_required_status <rollup_json> <required_names>
 # Re-aggregate ONLY the checks that gate merging. <required_names> is the newline-separated
 # list gci_review_for_mr resolved for the PR; empty means "do not filter" and this prints
 # nothing. Also prints nothing when none of the required checks has run on this commit yet —
@@ -586,12 +626,7 @@ gci_latest_ci() {
 # Output shape matches gci_github_checks_status: "canonical \t id \t url \t updated".
 gci_required_status() {
   [ -n "$2" ] || return 0
-  printf '%s' "$1" | jq -r --arg req "$2" '
-    ($req | split("\n") | map(select(length > 0))) as $names
-    | .check_runs[]?
-    | select(.name as $n | ($names | index($n)) != null)
-    | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")]
-    | @tsv' 2>/dev/null \
+  printf '%s' "$1" | jq -r --arg req "$2" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
     | gci_github_checks_status
 }
 
@@ -752,17 +787,13 @@ gci_review_for_mr() {
       | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
     GCI_REVIEW="$(gci_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
-    # Names of the checks that actually gate merging, for gci_required_status.
-    # A required legacy StatusContext disables filtering entirely: the REST
-    # commits/<sha>/check-runs endpoint returns check runs ONLY and never sees a commit
-    # status, so filtering by name would drop a failing required status and report green
-    # while the merge is in fact blocked. Falling back to "count everything" is the safe
-    # direction — same answer as before this feature existed.
+    # Names of the checks that actually gate merging, for gci_required_status. Legacy commit
+    # statuses are keyed on .context rather than .name and are included: the CI verdict now
+    # comes from the same statusCheckRollup, which carries them, so a required status filters
+    # like any check run instead of having to disable filtering to stay safe.
     GCI_REQUIRED_NAMES="$(printf '%s' "$resp" | jq -r '
       [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
-        | select(.isRequired == true) ] as $req
-      | if ($req | any(.__typename == "StatusContext")) then ""
-        else ($req | map(.name // empty) | join("\n")) end' 2>/dev/null)"
+        | select(.isRequired == true) | (.name // .context // empty) ] | join("\n")' 2>/dev/null)"
   fi
   return 0
 }

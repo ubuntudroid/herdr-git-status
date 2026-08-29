@@ -208,13 +208,20 @@ The practical consequence: a checkout far behind its remote shows its *own* CI, 
 That is a true statement about the code in front of you, where the alternative is a false one about
 code you do not have.
 
+**The verdict is GitHub's own**, read from the commit's `statusCheckRollup` — the same aggregation
+behind the green tick — rather than recomputed from the raw check-run list. That matters for two
+rules this plugin used to get wrong by re-implementing them: re-run attempts collapse to the latest
+per check, and check suites whose workflow run was **not triggered by the push** are excluded. The
+second one is the one that bites — a nightly `schedule` workflow failing against a commit would
+otherwise turn the space red while GitHub shows green, even though the failure says nothing about
+that commit. Legacy commit statuses are part of the rollup too, so they count and filter like check
+runs.
+
 **The cell appears whenever CI ran on that commit**, whether or not anything gates a merge — a green
 `main` is worth seeing. Merge guards only *narrow* the verdict; they are not what makes the cell
 appear. So the unfiltered result stands when the branch has no open PR (required-ness is a per-PR
-fact), when the PR configures no required checks, when none of the required checks has run on this
-commit yet, and when a required check is a **legacy commit status** rather than a check run — the
-REST endpoint the plugin reads returns check runs only and never sees a commit status, so filtering
-by name there could hide a failing required status and report green while the merge is blocked.
+fact), when the PR configures no required checks, and when none of the required checks has run on
+this commit yet.
 
 **No cell at all** when no CI ran on that commit.
 
