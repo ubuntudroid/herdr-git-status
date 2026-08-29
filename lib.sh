@@ -703,10 +703,6 @@ gci_review_for_mr() {
   # no PR must never inherit the previous space's required set — two worktrees of the same
   # repo would have matching check names, so a sibling PR's guards would silently filter it.
   GCI_REQUIRED_NAMES=""
-  # Set when required checks EXIST but cannot be filtered by name (see below). Distinct from
-  # an empty name list, which means "nothing is required": callers hide the CI cell in that
-  # case but must still show it here, because guards do exist.
-  GCI_REQUIRED_OPAQUE=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
     enc="$(gci_urlencode_path "$path")"
@@ -763,11 +759,6 @@ gci_review_for_mr() {
         | select(.isRequired == true) ] as $req
       | if ($req | any(.__typename == "StatusContext")) then ""
         else ($req | map(.name // empty) | join("\n")) end' 2>/dev/null)"
-    if [ -z "$GCI_REQUIRED_NAMES" ] && printf '%s' "$resp" | jq -e '
-          [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
-            | select(.isRequired == true) ] | length > 0' >/dev/null 2>&1; then
-      GCI_REQUIRED_OPAQUE=1
-    fi
   fi
   return 0
 }

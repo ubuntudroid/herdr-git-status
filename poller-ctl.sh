@@ -44,19 +44,19 @@ ws_list() {
 # Review state is its own token, not glued to the number: they are separate facts and
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
-  local cwd="$1" rc req all
+  local cwd="$1" rc req
   SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_MR=""; SPACE_SKIP=""
   # Never inherit the previous space's merge guards (see gci_review_for_mr).
-  GCI_REQUIRED_NAMES=""; GCI_REQUIRED_OPAQUE=""
+  GCI_REQUIRED_NAMES=""
   gci_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
     5)       SPACE_SKIP=1; return ;;
     0)
-      # Hold the unfiltered verdict aside. Whether it ever reaches the cell depends on
-      # whether merge-guarding checks exist, which is only knowable once the PR is resolved
-      # below — so SPACE_STATUS stays empty (no cell) until something earns it.
-      all="$GCI_STATUS"
+      # CI that actually ran on the branch's remote head is worth showing, whether or not
+      # anything gates a merge — so this is the verdict unless merge guards narrow it below.
+      # Empty (no CI ran at all) stays empty, which publishes no CI cell.
+      SPACE_STATUS="$GCI_STATUS"
       # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
       # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
       # here (not inside the old `if gci_open_pr`) because a merged PR returns rc 3 by definition,
@@ -71,17 +71,12 @@ status_for_repo() {
         # when nothing is blocking the merge. Required-ness is a per-PR fact (GitHub exposes
         # it as isRequired(pullRequestNumber:)), so this narrowing only applies where a PR
         # exists; a branch with no PR has no merge to guard and every check still counts.
-        if [ -n "$all" ]; then
-          if [ -n "$GCI_REQUIRED_NAMES" ] && [ -n "$GCI_CI_RESP" ]; then
-            # Empty result = required checks exist but none has run on this commit yet, so
-            # there is no merge-guard verdict to show. Leave the cell off.
-            req="$(gci_required_status "$GCI_CI_RESP" "$GCI_REQUIRED_NAMES")"
-            [ -n "$req" ] && SPACE_STATUS="${req%%$'\t'*}"
-          elif [ -n "$GCI_REQUIRED_OPAQUE" ]; then
-            # Guards exist but cannot be filtered by name — show the unfiltered verdict
-            # rather than hiding a cell that may be reporting a genuine block.
-            SPACE_STATUS="$all"
-          fi
+        if [ -n "$SPACE_STATUS" ] && [ -n "$GCI_REQUIRED_NAMES" ] && [ -n "$GCI_CI_RESP" ]; then
+          # Narrow to the merge guards when they exist AND have run. An empty result means
+          # none of them has run on this commit yet, so the unfiltered verdict stands rather
+          # than the cell going blank on a branch whose CI demonstrably ran.
+          req="$(gci_required_status "$GCI_CI_RESP" "$GCI_REQUIRED_NAMES")"
+          [ -n "$req" ] && SPACE_STATUS="${req%%$'\t'*}"
         fi
       fi
       ;;

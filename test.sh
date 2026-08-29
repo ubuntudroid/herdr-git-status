@@ -216,27 +216,6 @@ GH_FIXTURE="$PR_HEAD$ROLLUP}}}}"
 gci_review_for_mr "$DIR" myorg/app 1 github            # populates the names
 gci_review_for_mr "$DIR" "" "" github                  # no PR: must reset
 check "reqnames-not-loop-carried" "" "$GCI_REQUIRED_NAMES"
-# GCI_REQUIRED_OPAQUE distinguishes "nothing is required" (hide the CI cell) from "guards
-# exist but cannot be filtered by name" (show the unfiltered verdict). Both leave
-# GCI_REQUIRED_NAMES empty, so the cell rule needs the second signal.
-GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
-  {"__typename":"CheckRun","name":"django-test","isRequired":true},
-  {"__typename":"StatusContext","context":"ci/legacy","isRequired":true}]}}}}]}}}}}'
-gci_review_for_mr "$DIR" myorg/app 1 github
-check "opaque-set-on-statuscontext" "1" "$GCI_REQUIRED_OPAQUE"
-GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
-  {"__typename":"CheckRun","name":"django-test","isRequired":false}]}}}}]}}}}}'
-gci_review_for_mr "$DIR" myorg/app 1 github
-check "opaque-unset-when-none-required" "" "$GCI_REQUIRED_OPAQUE"
-GH_FIXTURE="$PR_HEAD$ROLLUP}}}}"
-gci_review_for_mr "$DIR" myorg/app 1 github
-check "opaque-unset-when-filterable" "" "$GCI_REQUIRED_OPAQUE"
-# Resets like GCI_REQUIRED_NAMES, or a no-PR space would inherit it and show a cell.
-GH_FIXTURE="$PR_HEAD"'"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[
-  {"__typename":"StatusContext","context":"ci/legacy","isRequired":true}]}}}}]}}}}}'
-gci_review_for_mr "$DIR" myorg/app 1 github
-gci_review_for_mr "$DIR" "" "" github
-check "opaque-not-loop-carried" "" "$GCI_REQUIRED_OPAQUE"
 
 unset -f gh
 

@@ -190,22 +190,18 @@ makes a merge guard. A failing optional check (a lint job, a coverage bot, a pre
 longer shows the space as broken when nothing is actually blocking the merge. A `SKIPPED` required
 check does not veto, matching GitHub's merge box.
 
-**No merge guards, no cell.** The cell reports merge-guarding checks, so it appears only where such
-checks exist. It is omitted entirely when:
+**The cell appears whenever CI ran on the branch's remote head**, whether or not anything gates a
+merge — a green `main` is worth seeing. Merge guards only *narrow* the verdict; they are not what
+makes the cell appear. So the unfiltered result stands when the branch has no open PR (required-ness
+is a per-PR fact), when the PR configures no required checks, when none of the required checks has
+run on this commit yet, and when a required check is a **legacy commit status** rather than a check
+run — the REST endpoint the plugin reads returns check runs only and never sees a commit status, so
+filtering by name there could hide a failing required status and report green while the merge is
+blocked.
 
-- the branch has no open PR — required-ness is a per-PR fact (`isRequired(pullRequestNumber:)`), and
-  a branch with no PR has no merge to guard;
-- the PR has no required checks configured at all;
-- required checks exist but none has run on this commit yet, so there is no guard verdict;
-- there is no CI on the commit at all.
-
-The one case that still shows the *unfiltered* verdict is a required **legacy commit status** rather
-than a check run: guards demonstrably exist, but the REST endpoint the plugin reads returns check
-runs only and never sees a commit status, so filtering by name could hide a failing required status
-and report green while the merge is blocked. Showing everything is the safe direction there.
-
-The practical effect is that CI appears on branches you are actually trying to land, and stays quiet
-on long-lived checkouts like `main`.
+**No cell at all** when no CI ran on that remote head. Note this is the branch's *remote* head, not
+your local one: an unpushed branch has nothing to report, and a fork whose own branch has no runs
+reports nothing rather than borrowing the upstream repo's result for a same-named branch.
 
 This costs no extra API call: the required names come from the same PR projection that resolves the
 review state. GitLab is unaffected (its merge model has no equivalent per-check required flag), and
@@ -277,8 +273,9 @@ echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env
 
 - `GITLAB_CI_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
 - `GITLAB_CI_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
-  (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot, e.g.
-  `GITLAB_CI_ICON_NONE=` shows nothing when a branch has no pipeline.
+  (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot. `_NONE` covers runs that
+  finished without a verdict — canceled, skipped, manual, unknown; a branch with no CI at all on its
+  remote head shows no cell regardless of this setting.
 - `GITLAB_CI_TOKEN_PREFIX` — prepended to every sidebar token name (`ci_ok`, `ci_fail`, `ci_run`,
   `ci_none`, `review_conflict`, `review_changes`, `review_draft`, `review_approved`,
   `review_awaiting`, `review_merged`, `mr`). Token names are one namespace shared by all plugins,
