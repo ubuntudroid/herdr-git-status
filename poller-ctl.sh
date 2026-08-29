@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# Always-live poller: publishes each space's CI status and MR/PR number as herdr
-# sidebar metadata tokens (`ci_*`, `review_*`, `mr`). It never touches space labels or the
+# Always-live poller: publishes each space's CI status and PR number as herdr
+# sidebar metadata tokens (`gst_ci_*`, `gst_review_*`, `gst_pr`). It never touches space labels or the
 # agent status dot. Control: start | stop | toggle | ensure | status | poll-once | restore | run
 #
 # Env:
-#   GITLAB_CI_REFRESH   poll interval seconds (default 30)
-#   GITLAB_CI_DRYRUN    if set, print intended token reports instead of publishing them
+#   GST_REFRESH   poll interval seconds (default 30)
+#   GST_DRYRUN    if set, print intended token reports instead of publishing them
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$DIR/lib.sh"
-gci_load_env "${HERDR_PLUGIN_CONFIG_DIR:-$DIR}"
+gst_load_env "${HERDR_PLUGIN_CONFIG_DIR:-$DIR}"
 
 HERDR="${HERDR_BIN_PATH:-herdr}"
 STATE_DIR="${HERDR_PLUGIN_STATE_DIR:-$DIR/.state}"
 PIDFILE="$STATE_DIR/poller.pid"
 LOGFILE="$STATE_DIR/poller.log"
-INTERVAL="${GITLAB_CI_REFRESH:-30}"
+INTERVAL="${GST_REFRESH:-30}"
 # A zero/garbage interval would make consecutive cycles share one epoch second, and a
 # report whose --seq repeats the last accepted one is silently dropped — so the sidebar
 # would freeze rather than poll fast. Clamp to the default instead.
 case "$INTERVAL" in ''|*[!0-9]*|0) INTERVAL=30 ;; esac
-DRYRUN="${GITLAB_CI_DRYRUN:-}"
+DRYRUN="${GST_DRYRUN:-}"
 CYCLE_SECS=0          # duration of the last completed poll; 0 until one finishes
-START_HEAL_SECS="${GITLAB_CI_START_HEAL_SECS:-5}"   # `start` watches this long, relaunching if the daemon dies
+START_HEAL_SECS="${GST_START_HEAL_SECS:-5}"   # `start` watches this long, relaunching if the daemon dies
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # -> lines "workspace_id<TAB>label"
@@ -33,22 +33,22 @@ ws_list() {
 }
 
 # Resolve a repo's sidebar state into globals (NOT stdout) so it can run without a
-# subshell — that lets the MR/PR lookup reuse the path/branch/provider that
-# gci_latest_ci just resolved:
+# subshell — that lets the PR lookup reuse the path/branch/provider that
+# gst_latest_ci just resolved:
 #   SPACE_STATUS  canonical CI status, or "" (unsupported remote / nothing to say)
-#   SPACE_REVIEW  canonical review state, or "" (no MR/PR)
-#   SPACE_MR      open/merged MR/PR number incl. sigil ("!123" / "#123") or "" (none)
+#   SPACE_REVIEW  canonical review state, or "" (no PR)
+#   SPACE_PR      open/merged PR number incl. sigil ("!123" / "#123") or "" (none)
 #   SPACE_SKIP    1 on a transient provider error — publish nothing this tick
-# These stay CANONICAL, not display strings: gci_report_tokens turns a state into the
+# These stay CANONICAL, not display strings: gst_report_tokens turns a state into the
 # token named for it, which is what lets the user colour each state separately.
 # Review state is its own token, not glued to the number: they are separate facts and
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
   local cwd="$1" rc req
-  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_MR=""; SPACE_SKIP=""
-  # Never inherit the previous space's merge guards (see gci_review_for_mr).
-  GCI_REQUIRED_NAMES=""
-  gci_latest_ci "$cwd"; rc=$?
+  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_SKIP=""
+  # Never inherit the previous space's merge guards (see gst_review_for_mr).
+  GST_REQUIRED_NAMES=""
+  gst_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
     5)       SPACE_SKIP=1; return ;;
@@ -56,26 +56,26 @@ status_for_repo() {
       # CI that actually ran on the branch's remote head is worth showing, whether or not
       # anything gates a merge — so this is the verdict unless merge guards narrow it below.
       # Empty (no CI ran at all) stays empty, which publishes no CI cell.
-      SPACE_STATUS="$GCI_STATUS"
+      SPACE_STATUS="$GST_STATUS"
       # Open PR -> its review badge. No open PR (rc 3) -> it may be merged: surface a positive
       # merged badge. Missing-args/api-error (rc 1|2) -> leave empty, don't mislabel. This lives
-      # here (not inside the old `if gci_open_pr`) because a merged PR returns rc 3 by definition,
+      # here (not inside the old `if gst_open_pr`) because a merged PR returns rc 3 by definition,
       # so gluing it to the open-PR success path would make it unreachable in the case it covers.
-      gci_open_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; rc=$?
-      if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gci_merged_pr "$cwd" "$GCI_PATH" "$GCI_BRANCH" "$GCI_PROVIDER"; }; then
-        [ "$rc" -eq 0 ] && gci_review_for_mr "$cwd" "$GCI_MR_PATH" "$GCI_MR_IID" "$GCI_PROVIDER"
-        SPACE_REVIEW="$GCI_REVIEW"
-        SPACE_MR="$GCI_MR_SIGIL$GCI_MR_IID"
+      gst_open_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; rc=$?
+      if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gst_merged_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; }; then
+        [ "$rc" -eq 0 ] && gst_review_for_mr "$cwd" "$GST_PR_PATH" "$GST_PR_ID" "$GST_PROVIDER"
+        SPACE_REVIEW="$GST_REVIEW"
+        SPACE_PR="$GST_PR_SIGIL$GST_PR_ID"
         # Only merge-guarding checks decide the CI cell: a failing optional check — a lint
         # job, a coverage bot, a preview deploy — is not a reason to show the space as broken
         # when nothing is blocking the merge. Required-ness is a per-PR fact (GitHub exposes
         # it as isRequired(pullRequestNumber:)), so this narrowing only applies where a PR
         # exists; a branch with no PR has no merge to guard and every check still counts.
-        if [ -n "$SPACE_STATUS" ] && [ -n "$GCI_REQUIRED_NAMES" ] && [ -n "$GCI_CI_RESP" ]; then
+        if [ -n "$SPACE_STATUS" ] && [ -n "$GST_REQUIRED_NAMES" ] && [ -n "$GST_CI_RESP" ]; then
           # Narrow to the merge guards when they exist AND have run. An empty result means
           # none of them has run on this commit yet, so the unfiltered verdict stands rather
           # than the cell going blank on a branch whose CI demonstrably ran.
-          req="$(gci_required_status "$GCI_CI_RESP" "$GCI_REQUIRED_NAMES")"
+          req="$(gst_required_status "$GST_CI_RESP" "$GST_REQUIRED_NAMES")"
           [ -n "$req" ] && SPACE_STATUS="${req%%$'\t'*}"
         fi
       fi
@@ -94,14 +94,14 @@ poll_once() {
   # would have every write after a daemon restart silently dropped. One seq per cycle is
   # enough — the next cycle is at least INTERVAL seconds later.
   seq="$(date +%s)"
-  ttl="$(gci_ttl_ms "$CYCLE_SECS" "$INTERVAL")"
+  ttl="$(gst_ttl_ms "$CYCLE_SECS" "$INTERVAL")"
   while IFS=$'\t' read -r wsid _ <&9; do
     [ -n "$wsid" ] || continue
     # Resolve the space's repo from a real terminal pane, skipping plugin panes (e.g. the
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
-    cwd="$(gci_pick_pane_cwd "$wsid" "$panes")"
+    cwd="$(gst_pick_pane_cwd "$wsid" "$panes")"
     if [ -z "$cwd" ]; then
-      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_MR=""; SPACE_SKIP=""
+      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_SKIP=""
     else
       status_for_repo "$cwd"
     fi
@@ -109,10 +109,10 @@ poll_once() {
     # its TTL, rather than blanking the sidebar over one failed call.
     [ -n "$SPACE_SKIP" ] && continue
     if [ -n "$DRYRUN" ]; then
-      printf 'would report %s: ci=%q review=%q mr=%q (ttl %sms)\n' \
-        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_MR" "$ttl"
+      printf 'would report %s: ci=%q review=%q pr=%q (ttl %sms)\n' \
+        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_PR" "$ttl"
     else
-      gci_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_MR" "$seq" "$ttl"
+      gst_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_PR" "$seq" "$ttl"
     fi
   done 9< <(ws_list)
 }
@@ -125,12 +125,12 @@ clear_tokens() {
     if [ -n "$DRYRUN" ]; then
       printf 'would clear tokens %s\n' "$wsid"
     else
-      gci_clear_tokens "$wsid" "$seq"
+      gst_clear_tokens "$wsid" "$seq"
     fi
   done 9< <(ws_list)
 }
 
-# Migration only. Earlier versions of this plugin prepended the CI dot and the MR/PR
+# Migration only. Earlier versions of this plugin prepended the CI dot and the PR
 # number to the space label; those decorations are inert now that the sidebar reads
 # tokens, and nothing else would ever remove them. Idempotent, so it is safe to run on
 # every daemon start as well as from `stop`/`restore`.
@@ -138,7 +138,7 @@ restore_labels() {
   local wsid label base
   while IFS=$'\t' read -r wsid label <&9; do
     [ -n "$wsid" ] || continue
-    base="$(gci_strip_ci_prefix "$label")"
+    base="$(gst_strip_ci_prefix "$label")"
     [ "$base" = "$label" ] && continue
     if [ -n "$DRYRUN" ]; then
       printf 'would restore %s: %q -> %q\n' "$wsid" "$label" "$base"
@@ -148,7 +148,7 @@ restore_labels() {
   done 9< <(ws_list)
 }
 
-is_running() { gci_daemon_alive "$PIDFILE" "poller-ctl.sh run"; }
+is_running() { gst_daemon_alive "$PIDFILE" "poller-ctl.sh run"; }
 
 # Launch a detached daemon and record its pid. The run-loop takes pidfile ownership, so an
 # older daemon (if any) self-exits on its next tick — this converges to a single poller.
@@ -192,7 +192,7 @@ case "${1:-status}" in
   stop)
     if [ -f "$PIDFILE" ]; then
       p="$(cat "$PIDFILE" 2>/dev/null)"; rm -f "$PIDFILE"
-      if [ -n "$p" ] && gci_pid_matches "$p" "poller-ctl.sh run"; then
+      if [ -n "$p" ] && gst_pid_matches "$p" "poller-ctl.sh run"; then
         kill "$p" 2>/dev/null
         # Bounded wait for graceful exit (the herdr call paces each iteration); TERM is
         # deferred while bash is mid-glab, so force-kill if it's still alive afterward.

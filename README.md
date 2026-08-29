@@ -1,8 +1,8 @@
-# GitLab & GitHub CI Status — herdr plugin
+# Git CI + Review Status — herdr plugin
 
-Surfaces CI status inside herdr — for both **GitLab** (pipelines + merge requests via `glab`) and
-**GitHub** (check runs + pull requests via `gh`), auto-detected from each repo's `origin` host — two
-ways:
+Surfaces CI and code-review status inside herdr — for **GitHub** (check runs + pull requests via
+`gh`) and **GitLab** (pipelines + merge requests via `glab`), auto-detected from each repo's
+`origin` host — two ways:
 
 1. **Live status dots in the spaces sidebar** — a background poller publishes **metadata tokens**
    per space: the CI cell `CI <glyph>` (🟢 passed · 🟡 running · 🔴 failed · ⚪ none), the
@@ -93,7 +93,7 @@ You only need the CLI for the hosts you actually use (jq + git are always requir
 
 ```sh
 herdr plugin link /path/to/this/plugin
-herdr plugin list        # confirm "gitlab-ci-status" is registered
+herdr plugin list        # confirm "git-status" is registered
 ```
 
 `herdr plugin link` is for local development and runs no build step — none is needed (pure Bash).
@@ -108,30 +108,31 @@ add these, the poller runs and nothing appears. Add them to `~/.config/herdr/con
 [ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
-  [{ token = "$ci_ok",   fg = "#9ece6a" },      # your theme's green
-   { token = "$ci_fail", fg = "#f7768e" },      # …red
-   { token = "$ci_run",  fg = "#e0af68" },      # …yellow
-   { token = "$ci_none", dim = true },
-   { token = "$review_conflict", fg = "#f7768e" },
-   { token = "$review_changes",  fg = "#e0af68" },
-   { token = "$review_approved", fg = "#9ece6a" },
-   { token = "$review_merged",   fg = "#bb9af7" },   # …purple
-   { token = "$review_awaiting", dim = true },
-   { token = "$review_draft",    dim = true },
-   { token = "$mr" },
+  [{ token = "$gst_ci_ok",   fg = "#9ece6a" },  # your theme's green
+   { token = "$gst_ci_fail", fg = "#f7768e" },  # …red
+   { token = "$gst_ci_run",  fg = "#e0af68" },  # …yellow
+   { token = "$gst_ci_none", dim = true },
+   { token = "$gst_review_conflict", fg = "#f7768e" },
+   { token = "$gst_review_changes",  fg = "#e0af68" },
+   { token = "$gst_review_approved", fg = "#9ece6a" },
+   { token = "$gst_review_merged",   fg = "#bb9af7" },   # …purple
+   { token = "$gst_review_awaiting", dim = true },
+   { token = "$gst_review_draft",    dim = true },
+   { token = "$gst_pr" },
    "branch", "git_status"],
 ]
 ```
 
 **Why one token per state.** herdr's token style is static config — `{ token, fg, bold, dim }`,
 with no conditional form — so one token cannot change colour by state. The state therefore lives
-in the token *name*: the poller publishes the CI cell under exactly one of `ci_ok` / `ci_fail` /
-`ci_run` / `ci_none`, the review glyph under exactly one of the six `review_*` names, and clears
+in the token *name*: the poller publishes the CI cell under exactly one of `gst_ci_ok` /
+`gst_ci_fail` / `gst_ci_run` / `gst_ci_none`, the review glyph under exactly one of the six
+`gst_review_*` names, and clears
 every sibling. Only one entry from each group ever renders, so a long-looking row stays short on
 screen. Drop the `fg`s and it all still works, just uncoloured.
 
 **This is also how you choose what to surface.** The plugin has no opinion any more: omit
-`$review_draft` and `$review_awaiting` and you get the old "only attention + ready" behaviour;
+`$gst_review_draft` and `$gst_review_awaiting` and you get the old "only attention + ready" behaviour;
 include them and you can see which PRs are parked with a reviewer.
 
 `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
@@ -142,9 +143,10 @@ Tokens can go on any row, in any order — put them on the first row if you want
 space name. A row whose every entry is empty is not rendered at all, so adding tokens to a row can
 make that row appear on spaces that previously had nothing to show there.
 
-If another plugin already publishes a token with one of these names, set
-`GITLAB_CI_TOKEN_PREFIX` (see [Configuration](#configuration)) and use the prefixed names in
-`rows` — token names are a single shared namespace across all plugins.
+**Token names are namespaced.** Every token this plugin publishes is prefixed `gst_`, so it
+cannot collide with another plugin's — token names are a single shared namespace across all
+plugins. Override the prefix with `GST_TOKEN_PREFIX` (see [Configuration](#configuration)) and
+mirror it in `rows`; set it to the empty string for bare `ci_ok` / `review_*` / `pr` names.
 
 ## Keybindings (one-time setup)
 
@@ -155,27 +157,27 @@ herdr 0.7 does **not** bind keys declared in a plugin manifest, so add the bindi
 [[keys.command]]
 key = "prefix+i"
 type = "shell"
-command = "herdr plugin action invoke gitlab-ci-status.toggle"
+command = "herdr plugin action invoke git-status.toggle"
 
 [[keys.command]]
 key = "prefix+shift+i"
 type = "shell"
-command = "herdr plugin action invoke gitlab-ci-status.open"
+command = "herdr plugin action invoke git-status.open"
 
 [[keys.command]]
 key = "prefix+r"
 type = "shell"
-command = "herdr plugin action invoke gitlab-ci-status.open-mr"
+command = "herdr plugin action invoke git-status.open-pr"
 ```
 
 (`prefix` is `ctrl+b`. You can also trigger the actions any time without a keybinding via
-`herdr plugin action invoke gitlab-ci-status.<toggle|start|stop|open|open-mr>`.)
+`herdr plugin action invoke git-status.<toggle|start|stop|open|open-pr>`.)
 
 ## Usage
 
 **Sidebar dots:** `ctrl+b` then `i` toggles the poller on/off. While on, every space gets its
 tokens refreshed every 30s. Toggling off (or `herdr plugin action invoke
-gitlab-ci-status.stop`) clears them immediately. Tokens also carry a TTL, so if the daemon is
+git-status.stop`) clears them immediately. Tokens also carry a TTL, so if the daemon is
 killed or the machine reboots they expire on their own within a few minutes.
 
 **Detail pane:** `ctrl+b` then `Shift+I` in a GitLab or GitHub workspace opens a split pane showing the
@@ -183,12 +185,12 @@ project link, branch, latest pipeline/run, and open MR/PR. In the pane: **`r`** 
 (`Ctrl-C` also closes it). The branch is re-read every refresh, so switching branches updates
 automatically.
 
-**My MRs pane:** `ctrl+b` then `r` opens a pane listing **your own** open MRs/PRs across every
+**My PRs pane:** `ctrl+b` then `r` opens a pane listing **your own** open PRs/MRs across every
 repo, aggregated from each provider you're authenticated with (GitLab via `glab`, GitHub via
 `gh`), in two sections — **Ready to merge** (approved & mergeable) and **Needs action** (changes
 requested / unresolved threads, or merge conflict). Each MR id is a clickable OSC 8 link. In the
 pane: `r` refresh, `q` quit (Ctrl-C also closes), auto-refresh 15s. Always invokable via
-`herdr plugin action invoke gitlab-ci-status.open-mr`.
+`herdr plugin action invoke git-status.open-pr`.
 
 **Only merge-guarding checks decide the CI cell.** On GitHub, when the branch has an open PR, the
 cell aggregates just that PR's *required* status checks — the ones branch protection or a ruleset
@@ -253,7 +255,7 @@ up — event-driven, no timers, cannot block sleep:
   <key>Label</key><string>dev.you.herdr-git-status-ensure</string>
   <key>ProgramArguments</key><array>
     <string>/bin/sh</string><string>-c</string>
-    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec /absolute/path/to/herdr plugin action invoke gitlab-ci-status.ensure || true</string>
+    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec /absolute/path/to/herdr plugin action invoke git-status.ensure || true</string>
   </array>
   <key>WatchPaths</key><array><string>/Users/you/.config/herdr/herdr.sock</string></array>
   <key>RunAtLoad</key><true/>
@@ -276,7 +278,7 @@ WantedBy=default.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/env herdr plugin action invoke gitlab-ci-status.ensure
+ExecStart=/usr/bin/env herdr plugin action invoke git-status.ensure
 ```
 
 Enable with `systemctl --user enable --now herdr-git-status-ensure.path`.
@@ -290,20 +292,21 @@ next herdr start — restart manually or add a timer if that ever matters.
 Optional. Put a `.env` file in the plugin's config dir (honored by both the pane and the poller):
 
 ```sh
-echo "GITLAB_CI_REFRESH=20" >> "$(herdr plugin config-dir gitlab-ci-status)/.env"
+echo "GST_REFRESH=20" >> "$(herdr plugin config-dir git-status)/.env"
 ```
 
-- `GITLAB_CI_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
-- `GITLAB_CI_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
+- `GST_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
+- `GST_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
   (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot. `_NONE` covers runs that
   finished without a verdict — canceled, skipped, manual, unknown; a branch with no CI at all on its
   remote head shows no cell regardless of this setting.
-- `GITLAB_CI_TOKEN_PREFIX` — prepended to every sidebar token name (`ci_ok`, `ci_fail`, `ci_run`,
-  `ci_none`, `review_conflict`, `review_changes`, `review_draft`, `review_approved`,
-  `review_awaiting`, `review_merged`, `mr`). Token names are one namespace shared by all plugins,
+- `GST_TOKEN_PREFIX` — replaces the default `gst_` prefix on every sidebar token name (`ci_ok`,
+  `ci_fail`, `ci_run`, `ci_none`, `review_conflict`, `review_changes`, `review_draft`,
+  `review_approved`, `review_awaiting`, `review_merged`, `pr`). Set it to the empty string for
+  bare, unprefixed names. Token names are one namespace shared by all plugins,
   so set this if another plugin already publishes one of those names — then mirror the prefix in
   `ui.sidebar.spaces.rows`. Default empty.
-- `GITLAB_CI_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
+- `GST_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
   review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). Each state has its own sidebar
   token, so which of them appear is up to your `rows`.
 
@@ -311,7 +314,7 @@ Example — GitHub's own octicons instead of emoji, so the sidebar matches what 
 PR page (needs a Nerd-patched terminal font, otherwise these render as tofu boxes). Codepoints are
 `nf-oct-*` from Nerd Fonts v3. The glyphs are given as codepoints rather than literal characters
 because they do not survive copy-paste through every editor — write them with
-`perl -CSD -e 'print "GITLAB_CI_ICON_OK=\x{F4A4}\n"'` or your editor's insert-codepoint command.
+`perl -CSD -e 'print "GST_ICON_OK=\x{F4A4}\n"'` or your editor's insert-codepoint command.
 
 ```sh
 # CI cell — one dot for every state, as in GitHub's commit-status dot. Colour carries
@@ -319,7 +322,7 @@ because they do not survive copy-paste through every editor — write them with
 #   OK / FAIL / RUN   nf-oct-dot_fill   U+F444
 #   NONE              leave empty for no cell at all, or nf-oct-skip U+F517
 #
-# If your rows do NOT colour the ci_* tokens, use distinct glyphs instead, matching
+# If your rows do NOT colour the gst_ci_* tokens, use distinct glyphs instead, matching
 # GitHub's check-status icons:
 #   OK    nf-oct-check_circle_fill      U+F4A4
 #   FAIL  nf-oct-x_circle_fill          U+F530
@@ -370,16 +373,16 @@ branch, and queries that provider for the latest CI run and the open MR/PR:
 glab/gh supply authentication and the host; the plugin stores no tokens of its own.
 
 The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actions) loops every
-`GITLAB_CI_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
+`GST_REFRESH` seconds: for each space it finds a pane cwd via `herdr pane list`, fetches the
 latest run and open MR/PR the same way, and publishes the result with
-`herdr workspace report-metadata --source gitlab-ci-status --token …`. Labels are never written, so
+`herdr workspace report-metadata --source git-status --token …`. Labels are never written, so
 this plugin cannot collide with another that decorates them.
 
 Every token goes in one call, because `--seq` is tracked per (workspace, source) and a report whose
 seq is not greater than the last accepted one is silently ignored. The seq is epoch seconds rather
 than a per-start counter, so a daemon restart does not start emitting values herdr will drop. The CI
-cell is published under the current state's `ci_*` token and the review glyph under the current
-state's `review_*` token, with every sibling state sent empty, which clears it — that is how
+cell is published under the current state's `gst_ci_*` token and the review glyph under the current
+state's `gst_review_*` token, with every sibling state sent empty, which clears it — that is how
 exactly one CI token and one review token stay live per space as the state changes.
 
 Tokens carry a TTL and herdr expires them itself, which is why the poller republishes every tick
@@ -398,11 +401,34 @@ behind by versions of this plugin that wrote the label. `restore` runs the same 
 
 | File | Purpose |
 |------|---------|
-| `herdr-plugin.toml` | Manifest: actions (`open`/`open-mr`/`start`/`stop`/`toggle`), the `ci` and `mr` panes, and keybindings. |
-| `poller-ctl.sh` | Always-live poller publishing the `ci`/`mr` sidebar tokens: `start`/`stop`/`toggle`/`ensure`/`status`/`poll-once`/`restore`. |
+| `herdr-plugin.toml` | Manifest: actions (`open`/`open-pr`/`start`/`stop`/`toggle`), the `ci` and `pr` panes, and keybindings. |
+| `poller-ctl.sh` | Always-live poller publishing the `gst_ci_*`/`gst_review_*`/`gst_pr` sidebar tokens: `start`/`stop`/`toggle`/`ensure`/`status`/`poll-once`/`restore`. |
 | `open.sh` | Resolves the repo dir from workspace context and opens the detail pane. |
-| `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GITLAB_CI_ONCE=1` for one-shot output). |
-| `open-mr.sh` | Resolves the repo context and opens the "My MRs" pane. |
-| `mr-pane.sh` | The "My MRs" pane: my open MRs/PRs across providers, grouped ready / needs-action. |
-| `lib.sh` | Shared helpers: remote parsing, provider detection, GitLab/GitHub CI + MR/PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader, sidebar token reporting. |
+| `ci-pane.sh` | The detail pane's live fetch → render → sleep loop (`GST_ONCE=1` for one-shot output). |
+| `open-pr.sh` | Resolves the repo context and opens the "My PRs" pane. |
+| `pr-pane.sh` | The "My PRs" pane: my open PRs/MRs across providers, grouped ready / needs-action. |
+| `lib.sh` | Shared helpers: remote parsing, provider detection, GitHub/GitLab CI + PR fetch, recent-failures fetch, provider-aware pane label, status glyph/emoji, relative time, hyperlink, env loader, sidebar token reporting. |
 | `test.sh` | Unit tests for `lib.sh`. Run with `bash test.sh`. |
+
+## Credits
+
+This plugin began as a fork of **[krystof018/herdr-git-status](https://github.com/krystof018/herdr-git-status)**
+by krystof018, which originated the sidebar-status idea, the poller/pane split, and the shape of
+the detail pane. It has since diverged substantially — GitHub support, the review-state model,
+namespaced sidebar tokens, reboot-surviving autostart, and a much larger test suite are additions
+here — and it is maintained independently. It is **not** affiliated with or endorsed by the
+original author, and bugs here should be reported here, not upstream.
+
+## Licence
+
+> **Status: unlicensed — redistribution is not yet permitted.**
+>
+> The upstream project this is derived from carries no licence file and no licence grant, so by
+> default all rights in the code inherited from it remain reserved to its author. Until an explicit
+> grant is obtained, this repository may not be redistributed, published to the herdr plugin
+> marketplace, or relicensed — and no licence can be declared here, because the derived portions
+> are not the maintainer's to license.
+>
+> A licence request addressed to the original author is drafted in `LICENSE-REQUEST.md` but has
+> **not** been sent yet. If a grant is given, this section will be replaced with the agreed
+> licence. Use it locally at your own discretion in the meantime.

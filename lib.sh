@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Shared helpers for the gitlab-ci-status herdr plugin. Source this file.
+# Shared helpers for the git-status herdr plugin. Source this file.
 
 # Colors: empty when NO_COLOR set or stdout is not a tty.
 if [ -z "${NO_COLOR:-}" ] && [ -t 1 ]; then
-  GCI_RESET=$'\033[0m'; GCI_GREEN=$'\033[32m'; GCI_RED=$'\033[31m'
-  GCI_YELLOW=$'\033[33m'; GCI_GRAY=$'\033[90m'; GCI_BLUE=$'\033[34m'; GCI_BOLD=$'\033[1m'
+  GST_RESET=$'\033[0m'; GST_GREEN=$'\033[32m'; GST_RED=$'\033[31m'
+  GST_YELLOW=$'\033[33m'; GST_GRAY=$'\033[90m'; GST_BLUE=$'\033[34m'; GST_BOLD=$'\033[1m'
 else
-  GCI_RESET=''; GCI_GREEN=''; GCI_RED=''; GCI_YELLOW=''; GCI_GRAY=''; GCI_BLUE=''; GCI_BOLD=''
+  GST_RESET=''; GST_GREEN=''; GST_RED=''; GST_YELLOW=''; GST_GRAY=''; GST_BLUE=''; GST_BOLD=''
 fi
 
 # Always-required tools. The provider CLI (glab for GitLab, gh for GitHub) is
-# checked per-repo in gci_latest_ci, since only one is needed for a given remote.
-gci_require_deps() {
+# checked per-repo in gst_latest_ci, since only one is needed for a given remote.
+gst_require_deps() {
   local missing=()
   for bin in jq git; do command -v "$bin" >/dev/null 2>&1 || missing+=("$bin"); done
   if [ ${#missing[@]} -gt 0 ]; then
@@ -23,7 +23,7 @@ gci_require_deps() {
 
 # Load KEY=VALUE lines from <dir>/.env without overriding vars already in the
 # environment (so real env vars win). <dir> defaults to $HERDR_PLUGIN_CONFIG_DIR.
-gci_load_env() {
+gst_load_env() {
   local dir="${1:-${HERDR_PLUGIN_CONFIG_DIR:-}}" f k v
   [ -n "$dir" ] && [ -f "$dir/.env" ] || return 0
   f="$dir/.env"
@@ -34,7 +34,7 @@ gci_load_env() {
 }
 
 # Print "host<TAB>path" (path without trailing .git). Return 1 if not parseable.
-gci_parse_remote() {
+gst_parse_remote() {
   local url="$1" host path rest
   case "$url" in
     ssh://*)
@@ -55,10 +55,10 @@ gci_parse_remote() {
   printf '%s\t%s\n' "$host" "$path"
 }
 
-gci_urlencode_path() { printf '%s\n' "${1//\//%2F}"; }
+gst_urlencode_path() { printf '%s\n' "${1//\//%2F}"; }
 
 # Map a remote host to a CI provider: "gitlab", "github", or "" (unsupported).
-gci_provider() {
+gst_provider() {
   case "$1" in
     *gitlab*) printf 'gitlab' ;;
     *github*) printf 'github' ;;
@@ -67,36 +67,36 @@ gci_provider() {
 }
 
 # Provider-aware label for the detail pane's herdr border (overrides the plugin-id
-# fallback "gitlab-ci-status"). Derived cheaply from origin — no API call — so it is
+# fallback "git-status"). Derived cheaply from origin — no API call — so it is
 # safe to set at pane startup: "GitLab CI", "GitHub CI", or plain "CI" otherwise.
-gci_pane_title() {
+gst_pane_title() {
   local repo="$1" url parsed host
   url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || { printf 'CI'; return; }
-  parsed="$(gci_parse_remote "$url" 2>/dev/null)" || { printf 'CI'; return; }
+  parsed="$(gst_parse_remote "$url" 2>/dev/null)" || { printf 'CI'; return; }
   host="${parsed%%$'\t'*}"
-  case "$(gci_provider "$host")" in
+  case "$(gst_provider "$host")" in
     gitlab) printf 'GitLab CI' ;;
     github) printf 'GitHub CI' ;;
     *)      printf 'CI' ;;
   esac
 }
 
-gci_status_glyph() {
+gst_status_glyph() {
   case "$1" in
-    success)  printf '%s' "${GCI_GREEN}✓ passed${GCI_RESET}" ;;
-    failed)   printf '%s' "${GCI_RED}✗ failed${GCI_RESET}" ;;
-    running)  printf '%s' "${GCI_YELLOW}● running${GCI_RESET}" ;;
+    success)  printf '%s' "${GST_GREEN}✓ passed${GST_RESET}" ;;
+    failed)   printf '%s' "${GST_RED}✗ failed${GST_RESET}" ;;
+    running)  printf '%s' "${GST_YELLOW}● running${GST_RESET}" ;;
     pending|created|preparing|waiting_for_resource|scheduled)
-              printf '%s' "${GCI_YELLOW}● $1${GCI_RESET}" ;;
+              printf '%s' "${GST_YELLOW}● $1${GST_RESET}" ;;
     canceled|skipped)
-              printf '%s' "${GCI_GRAY}• $1${GCI_RESET}" ;;
-    manual)   printf '%s' "${GCI_BLUE}⚙ manual${GCI_RESET}" ;;
+              printf '%s' "${GST_GRAY}• $1${GST_RESET}" ;;
+    manual)   printf '%s' "${GST_BLUE}⚙ manual${GST_RESET}" ;;
     *)        printf '%s' "${1:-unknown}" ;;
   esac
 }
 
 # Relative time from ISO-8601. Optional 2nd arg = reference epoch (for tests).
-gci_relative_time() {
+gst_relative_time() {
   local iso="$1" now="${2:-}" epoch base diff
   base="${iso%.*}"; base="${base%Z}"           # 2026-06-25T08:30:00
   epoch="$(date -u -d "$base" +%s 2>/dev/null \
@@ -115,7 +115,7 @@ gci_relative_time() {
 # static config ({ token, fg, bold, dim }) with no conditional form: one token cannot
 # change colour by state, so the state has to live in the token NAME for the user's
 # rows to be able to colour it.
-gci_status_bucket() {
+gst_status_bucket() {
   case "$1" in
     success)  printf 'ok' ;;
     failed)   printf 'fail' ;;
@@ -125,21 +125,21 @@ gci_status_bucket() {
   esac
 }
 
-# CI status -> a single dot glyph. Each glyph is overridable via GITLAB_CI_ICON_*
+# CI status -> a single dot glyph. Each glyph is overridable via GST_ICON_*
 # (.env or environment); a var that is set but EMPTY hides the glyph — hence
 # ${VAR-default}, not ${VAR:-default}.
-gci_status_emoji() {
-  case "$(gci_status_bucket "$1")" in
-    ok)   printf '%s' "${GITLAB_CI_ICON_OK-🟢}" ;;
-    fail) printf '%s' "${GITLAB_CI_ICON_FAIL-🔴}" ;;
-    run)  printf '%s' "${GITLAB_CI_ICON_RUN-🟡}" ;;
-    *)    printf '%s' "${GITLAB_CI_ICON_NONE-⚪}" ;;
+gst_status_emoji() {
+  case "$(gst_status_bucket "$1")" in
+    ok)   printf '%s' "${GST_ICON_OK-🟢}" ;;
+    fail) printf '%s' "${GST_ICON_FAIL-🔴}" ;;
+    run)  printf '%s' "${GST_ICON_RUN-🟡}" ;;
+    *)    printf '%s' "${GST_ICON_NONE-⚪}" ;;
   esac
 }
 
 # Normalize a GitHub Actions run (.status, .conclusion) to the canonical status
-# vocabulary used by gci_status_glyph / gci_status_emoji.
-gci_github_status() {
+# vocabulary used by gst_status_glyph / gst_status_emoji.
+gst_github_status() {
   # NB: avoid a local named `status` — it is a read-only special var in zsh.
   local st="$1" cc="$2"
   if [ "$st" != "completed" ]; then
@@ -165,7 +165,7 @@ gci_github_status() {
 # (failed > running > pending > manual > canceled > success > unknown > skipped). Reads
 # "status \t conclusion \t id \t url \t updated" lines; prints the winning run as
 # "canonical \t id \t url \t updated", or nothing on empty input.
-gci_github_checks_status() {
+gst_github_checks_status() {
   # NB: split manually — tab is IFS whitespace, so `read` would collapse the empty
   # conclusion field of a non-completed run and shift the remaining columns.
   local line st cc rest s p best="" bp=-1 tab=$'\t'
@@ -173,7 +173,7 @@ gci_github_checks_status() {
     [ -n "$line" ] || continue
     st="${line%%"$tab"*}"; rest="${line#*"$tab"}"
     cc="${rest%%"$tab"*}"; rest="${rest#*"$tab"}"
-    s="$(gci_github_status "$st" "$cc")"
+    s="$(gst_github_status "$st" "$cc")"
     case "$s" in
       failed) p=7 ;; running) p=6 ;; pending) p=5 ;; manual) p=4 ;;
       canceled) p=3 ;; success) p=2 ;; unknown) p=1 ;; *) p=0 ;;
@@ -185,40 +185,40 @@ gci_github_checks_status() {
 
 # Canonical CI status -> the sidebar cell: "CI <glyph>". Labelling the cell means the
 # glyph is not the only thing identifying what it means. A glyph hidden by a set-but-empty
-# GITLAB_CI_ICON_* stays fully hidden — a bare "CI" with no state would be noise.
-gci_ci_cell() {
+# GST_ICON_* stays fully hidden — a bare "CI" with no state would be noise.
+gst_ci_cell() {
   local g
-  g="$(gci_status_emoji "$1")"
+  g="$(gst_status_emoji "$1")"
   [ -n "$g" ] && printf 'CI %s' "$g"
 }
 
-# Canonical review state -> glyph (full vocabulary; used by the My-MRs pane and tests).
+# Canonical review state -> glyph (full vocabulary; used by the My-PRs pane and tests).
 # States: conflict | changes | draft | approved | awaiting | merged | (anything else / "") -> "".
-# Overridable via GITLAB_CI_ICON_* like gci_status_emoji (set-but-empty hides).
-gci_review_glyph() {
+# Overridable via GST_ICON_* like gst_status_emoji (set-but-empty hides).
+gst_review_glyph() {
   case "$1" in
-    conflict) printf '%s' "${GITLAB_CI_ICON_CONFLICT-⚠️}" ;;
-    changes)  printf '%s' "${GITLAB_CI_ICON_CHANGES-💬}" ;;
-    draft)    printf '%s' "${GITLAB_CI_ICON_DRAFT-📝}" ;;
-    approved) printf '%s' "${GITLAB_CI_ICON_APPROVED-✅}" ;;
-    awaiting) printf '%s' "${GITLAB_CI_ICON_AWAITING-👀}" ;;
-    merged)   printf '%s' "${GITLAB_CI_ICON_MERGED-🔀}" ;;
+    conflict) printf '%s' "${GST_ICON_CONFLICT-⚠️}" ;;
+    changes)  printf '%s' "${GST_ICON_CHANGES-💬}" ;;
+    draft)    printf '%s' "${GST_ICON_DRAFT-📝}" ;;
+    approved) printf '%s' "${GST_ICON_APPROVED-✅}" ;;
+    awaiting) printf '%s' "${GST_ICON_AWAITING-👀}" ;;
+    merged)   printf '%s' "${GST_ICON_MERGED-🔀}" ;;
     *)        printf '' ;;
   esac
 }
 
-# Canonical review state -> the sidebar cell: "R <glyph>". Same shape as gci_ci_cell: the
-# label says which cell this is, and a glyph hidden by a set-but-empty GITLAB_CI_ICON_*
+# Canonical review state -> the sidebar cell: "R <glyph>". Same shape as gst_ci_cell: the
+# label says which cell this is, and a glyph hidden by a set-but-empty GST_ICON_*
 # stays fully hidden rather than rendering a bare "R".
-gci_review_cell() {
+gst_review_cell() {
   local g
-  g="$(gci_review_glyph "$1")"
+  g="$(gst_review_glyph "$1")"
   [ -n "$g" ] && printf 'R %s' "$g"
 }
 
-# Canonical review state -> My-MRs pane section: "ready" (approved & mergeable),
+# Canonical review state -> My-PRs pane section: "ready" (approved & mergeable),
 # "action" (conflict or changes), or "" (not surfaced: draft/awaiting/none).
-gci_mr_section() {
+gst_mr_section() {
   case "$1" in
     approved)         printf 'ready' ;;
     conflict|changes) printf 'action' ;;
@@ -230,7 +230,7 @@ gci_mr_section() {
 # MR's `blocking_discussions_resolved` flag as a fallback for statuses that don't themselves
 # encode review. Returns: conflict | changes | draft | approved | awaiting.
 # Args: <detailed_merge_status> [blocking_discussions_resolved: true|false]
-gci_gitlab_review_state() {
+gst_gitlab_review_state() {
   local dms="$1" blocking="${2:-true}"
   case "$dms" in
     conflict)                 printf 'conflict' ;;
@@ -247,7 +247,7 @@ gci_gitlab_review_state() {
 # null still defaults to "true", but a real false must survive — jq's `//` treats false as
 # falsy and would erase it, so the 'changes' fallback above could never fire.
 # Args: <mr_json>
-gci_gitlab_blocking_resolved() {
+gst_gitlab_blocking_resolved() {
   printf '%s' "$1" | jq -r '.blocking_discussions_resolved | if . == null then "true" else tostring end' 2>/dev/null
 }
 
@@ -256,7 +256,7 @@ gci_gitlab_blocking_resolved() {
 # Args: <isDraft: true|false> <mergeable: MERGEABLE|CONFLICTING|UNKNOWN>
 #       <reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|''> <unresolved_threads: int>
 #       [standing_changes_reviews: int] [pending_review_requests: int]
-gci_github_review_state() {
+gst_github_review_state() {
   local draft="$1" mergeable="$2" decision="$3" unresolved="${4:-0}" standing="${5:-0}" pending="${6:-0}"
   if [ "$mergeable" = "CONFLICTING" ]; then printf 'conflict'; return; fi
   # standing = CHANGES_REQUESTED entries in latestOpinionatedReviews whose author is NOT in
@@ -286,12 +286,12 @@ gci_github_review_state() {
 # (with optional following space) and then an optional "!<digits> " (GitLab MR) or
 # "#<digits> " (GitHub PR) token. Byte-safe (prefix removal), so it stays idempotent
 # across re-applies and user renames. Both parts are optional, stripped independently.
-gci_strip_ci_prefix() {
+gst_strip_ci_prefix() {
   local rest="$1" e body num after
   # Configured glyphs first, then the emoji defaults — so labels decorated before an
   # icon-config change still strip instead of accumulating.
-  for e in "${GITLAB_CI_ICON_OK-}" "${GITLAB_CI_ICON_RUN-}" "${GITLAB_CI_ICON_FAIL-}" \
-           "${GITLAB_CI_ICON_NONE-}" '🟢' '🟡' '🔴' '⚪'; do
+  for e in "${GST_ICON_OK-}" "${GST_ICON_RUN-}" "${GST_ICON_FAIL-}" \
+           "${GST_ICON_NONE-}" '🟢' '🟡' '🔴' '⚪'; do
     [ -n "$e" ] || continue      # an empty pattern would match anything
     if [ "${rest#"$e" }" != "$rest" ]; then rest="${rest#"$e" }"; break; fi
     if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
@@ -300,8 +300,8 @@ gci_strip_ci_prefix() {
   # ("✅ #123", how the poller emits it). Only stripped when a sigil+digit follows, so a
   # user label that merely starts with one of these emoji (e.g. "✅ done") is never clobbered.
   # The trailing "#123 " token is then removed by the sigil case below in both forms.
-  for e in "${GITLAB_CI_ICON_CONFLICT-}" "${GITLAB_CI_ICON_CHANGES-}" "${GITLAB_CI_ICON_DRAFT-}" \
-           "${GITLAB_CI_ICON_APPROVED-}" "${GITLAB_CI_ICON_AWAITING-}" "${GITLAB_CI_ICON_MERGED-}" \
+  for e in "${GST_ICON_CONFLICT-}" "${GST_ICON_CHANGES-}" "${GST_ICON_DRAFT-}" \
+           "${GST_ICON_APPROVED-}" "${GST_ICON_AWAITING-}" "${GST_ICON_MERGED-}" \
            '⚠️' '💬' '📝' '✅' '👀' '🔀'; do
     [ -n "$e" ] || continue
     case "$rest" in
@@ -321,7 +321,7 @@ gci_strip_ci_prefix() {
 }
 
 # Ordered cwds (foreground_cwd, else cwd) of a workspace's panes, one per line, in list order.
-gci_pane_cwds() {
+gst_pane_cwds() {
   local wsid="$1" panes_json="$2"
   printf '%s' "$panes_json" | jq -r --arg w "$wsid" '
     (.result.panes // .panes // .)[] | select(.workspace_id == $w) | (.foreground_cwd // .cwd) // empty
@@ -330,7 +330,7 @@ gci_pane_cwds() {
 
 # True (exit 0) when <dir> is a git work tree that has an origin remote — i.e. a real project
 # checkout, as opposed to a remote-less git dir like the status-bar plugin's own repo.
-gci_git_has_origin() {
+gst_git_has_origin() {
   local dir="$1"
   [ -n "$dir" ] || return 1
   git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
@@ -345,35 +345,35 @@ gci_git_has_origin() {
 # checkout is a git repo WITH an origin remote, so the origin heuristic alone can't tell it
 # from the project repo. Falls back to the first non-plugin pane when none qualifies.
 # Args: <workspace_id> <pane_list_json>. Echoes the cwd, or nothing.
-gci_pick_pane_cwd() {
+gst_pick_pane_cwd() {
   local wsid="$1" panes_json="$2" cwd first=""
-  local plugroot="${GCI_PLUGINS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins}"
+  local plugroot="${GST_PLUGINS_ROOT:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr/plugins}"
   while IFS= read -r cwd; do
     [ -n "$cwd" ] || continue
     case "$cwd" in "$plugroot"|"$plugroot"/*) continue ;; esac
     [ -n "$first" ] || first="$cwd"
-    if gci_git_has_origin "$cwd"; then printf '%s\n' "$cwd"; return 0; fi
-  done < <(gci_pane_cwds "$wsid" "$panes_json")
+    if gst_git_has_origin "$cwd"; then printf '%s\n' "$cwd"; return 0; fi
+  done < <(gst_pane_cwds "$wsid" "$panes_json")
   [ -n "$first" ] && printf '%s\n' "$first"
 }
 
-# gci_pid_matches <pid> <pattern> — true when <pid> is alive AND its command line
+# gst_pid_matches <pid> <pattern> — true when <pid> is alive AND its command line
 # contains <pattern> (fixed string). Guards every pidfile consumer against pid
 # reuse after a reboot: kill -0 alone cannot tell our daemon from a stranger.
-gci_pid_matches() {
+gst_pid_matches() {
   ps -p "$1" -o command= 2>/dev/null | grep -qF "$2"
 }
 
 # True (exit 0) only when <pidfile> exists and names a live process. Backs the poller's
 # is_running check and its self-healing `start`, which relaunches whenever this is false.
-gci_daemon_alive() {
+gst_daemon_alive() {
   local pidfile="$1" pattern="${2:-}" pid
   [ -f "$pidfile" ] || return 1
   pid="$(cat "$pidfile" 2>/dev/null)"
   [ -n "$pid" ] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   [ -z "$pattern" ] && return 0
-  gci_pid_matches "$pid" "$pattern"
+  gst_pid_matches "$pid" "$pattern"
 }
 
 # --- sidebar metadata tokens -------------------------------------------------
@@ -383,24 +383,25 @@ gci_daemon_alive() {
 # Tokens are namespaced per --source and cannot clobber each other.
 #
 # herdr renders a token only if the user's ui.sidebar.spaces.rows asks for it by name,
-# and every plugin's tokens share ONE name space. GITLAB_CI_TOKEN_PREFIX moves all of
-# ours out of the way of a colliding plugin in one setting; the prefix must be mirrored
-# in rows.
-GCI_CI_BUCKETS='ok fail run none'
-GCI_REVIEW_STATES='conflict changes draft approved awaiting merged'
-gci_token_name() { printf '%s' "${GITLAB_CI_TOKEN_PREFIX:-}$1"; }
+# and every plugin's tokens share ONE name space. Ours are prefixed "gst_" by default so
+# they cannot collide with another plugin's (or with this plugin's own upstream ancestor,
+# which published bare `ci_*`/`review_*`/`mr`). GST_TOKEN_PREFIX overrides the prefix;
+# set it empty for bare names. Whatever it is must be mirrored in rows.
+GST_CI_BUCKETS='ok fail run none'
+GST_REVIEW_STATES='conflict changes draft approved awaiting merged'
+gst_token_name() { printf '%s' "${GST_TOKEN_PREFIX-gst_}$1"; }
 
 # Every token this plugin can publish, in row order.
-gci_token_suffixes() {
+gst_token_suffixes() {
   local b st
-  for b in $GCI_CI_BUCKETS;    do printf 'ci_%s\n' "$b"; done
-  for st in $GCI_REVIEW_STATES; do printf 'review_%s\n' "$st"; done
-  printf 'mr\n'
+  for b in $GST_CI_BUCKETS;    do printf 'ci_%s\n' "$b"; done
+  for st in $GST_REVIEW_STATES; do printf 'review_%s\n' "$st"; done
+  printf 'pr\n'
 }
 
-# gci_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms>
+# gst_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms>
 # <ci_status> is a canonical CI status ("" = none at all); <review_state> a canonical
-# review state ("" = no MR/PR).
+# review state ("" = no PR).
 #
 # Every token goes in ONE call. --seq is tracked per (workspace, source) and a report
 # whose seq is <= the last accepted one is silently ignored, so a second call in the
@@ -411,42 +412,42 @@ gci_token_suffixes() {
 # and one review token live per space, so the user's per-state `fg` can colour them —
 # herdr's token style is static config, so a single token could only have one colour.
 # An empty value clearing its token is also what makes a set-but-empty
-# GITLAB_CI_ICON_* override hide that glyph rather than render a blank slot.
-gci_report_tokens() {
-  local wsid="$1" status="$2" review="$3" mr="$4" seq="$5" ttl="$6" b st bucket
+# GST_ICON_* override hide that glyph rather than render a blank slot.
+gst_report_tokens() {
+  local wsid="$1" status="$2" review="$3" pr="$4" seq="$5" ttl="$6" b st bucket
   local -a args=()
   bucket=""
-  [ -n "$status" ] && bucket="$(gci_status_bucket "$status")"
-  for b in $GCI_CI_BUCKETS; do
-    if [ "$b" = "$bucket" ]; then args+=(--token "$(gci_token_name "ci_$b")=$(gci_ci_cell "$status")")
-    else                         args+=(--token "$(gci_token_name "ci_$b")=")
+  [ -n "$status" ] && bucket="$(gst_status_bucket "$status")"
+  for b in $GST_CI_BUCKETS; do
+    if [ "$b" = "$bucket" ]; then args+=(--token "$(gst_token_name "ci_$b")=$(gst_ci_cell "$status")")
+    else                         args+=(--token "$(gst_token_name "ci_$b")=")
     fi
   done
-  for st in $GCI_REVIEW_STATES; do
-    if [ "$st" = "$review" ]; then args+=(--token "$(gci_token_name "review_$st")=$(gci_review_cell "$st")")
-    else                          args+=(--token "$(gci_token_name "review_$st")=")
+  for st in $GST_REVIEW_STATES; do
+    if [ "$st" = "$review" ]; then args+=(--token "$(gst_token_name "review_$st")=$(gst_review_cell "$st")")
+    else                          args+=(--token "$(gst_token_name "review_$st")=")
     fi
   done
-  args+=(--token "$(gci_token_name mr)=$mr")
+  args+=(--token "$(gst_token_name pr)=$pr")
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$wsid" \
-    --source gitlab-ci-status \
+    --source git-status \
     "${args[@]}" \
     --seq "$seq" \
     --ttl-ms "$ttl" >/dev/null 2>&1
 }
 
-# gci_clear_tokens <ws_id> <seq> — drop every token now instead of waiting out the TTL.
-gci_clear_tokens() {
+# gst_clear_tokens <ws_id> <seq> — drop every token now instead of waiting out the TTL.
+gst_clear_tokens() {
   local sfx
   local -a args=()
-  while IFS= read -r sfx; do args+=(--clear-token "$(gci_token_name "$sfx")"); done < <(gci_token_suffixes)
+  while IFS= read -r sfx; do args+=(--clear-token "$(gst_token_name "$sfx")"); done < <(gst_token_suffixes)
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$1" \
-    --source gitlab-ci-status \
+    --source git-status \
     "${args[@]}" \
     --seq "$2" >/dev/null 2>&1
 }
 
-# gci_ttl_ms <last_cycle_secs> <interval_secs>
+# gst_ttl_ms <last_cycle_secs> <interval_secs>
 # Tokens carry a TTL so a dead daemon's dots expire on their own; herdr then emits
 # workspace.metadata_updated on expiry. That means the poller must republish every
 # tick, not only on change, or the sidebar blanks while a repo is quiet.
@@ -457,7 +458,7 @@ gci_clear_tokens() {
 # measured duration, with a floor covering the first pass (cycle unknown = 0).
 # ponytail: 3x headroom absorbs a couple of skipped ticks; the cost is that a
 # crashed daemon's tokens linger that long. `stop` clears them explicitly.
-gci_ttl_ms() {
+gst_ttl_ms() {
   local secs=$(( 3 * ($1 + $2) ))
   [ "$secs" -lt 90 ] && secs=90
   printf '%s' "$(( secs * 1000 ))"
@@ -466,9 +467,9 @@ gci_ttl_ms() {
 # Emit <text> as an OSC 8 terminal hyperlink to <url> (Ctrl/Cmd-clickable in modern
 # terminals). Falls back to plain <text> when colors are disabled (NO_COLOR / not a
 # tty), so output stays deterministic in tests and pipes.
-gci_hyperlink() {
+gst_hyperlink() {
   local url="$1" text="$2"
-  if [ -z "$GCI_RESET" ]; then printf '%s' "$text"; return; fi
+  if [ -z "$GST_RESET" ]; then printf '%s' "$text"; return; fi
   # BEL-terminated OSC 8 (more widely supported than the ESC-backslash ST form).
   printf '\033]8;;%s\a%s\033]8;;\a' "$url" "$text"
 }
@@ -478,12 +479,12 @@ gci_hyperlink() {
 # Pure git-config read — no network. Forks without an `upstream` remote could fall back
 # to the forge API (gh repo view --json parent / GitLab forked_from_project) — YAGNI
 # until such a checkout shows up.
-gci_upstream_path() {
+gst_upstream_path() {
   local repo="$1" ourl uurl op upp
   ourl="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 0
   uurl="$(git -C "$repo" remote get-url upstream 2>/dev/null)" || return 0
-  op="$(gci_parse_remote "$ourl" 2>/dev/null)" || return 0
-  upp="$(gci_parse_remote "$uurl" 2>/dev/null)" || return 0
+  op="$(gst_parse_remote "$ourl" 2>/dev/null)" || return 0
+  upp="$(gst_parse_remote "$uurl" 2>/dev/null)" || return 0
   [ "${op%%$'\t'*}" = "${upp%%$'\t'*}" ] || return 0
   printf '%s\n' "${upp#*$'\t'}"
 }
@@ -491,27 +492,27 @@ gci_upstream_path() {
 # Resolve a repo's latest CI state for its current branch, dispatching on the remote
 # provider (GitLab pipelines via glab, GitHub Actions runs via gh). Returns everything
 # via globals (NOT stdout) so it can be called without a subshell:
-#   GCI_HOST, GCI_PATH, GCI_BRANCH, GCI_PROVIDER, GCI_ERR (on error),
-#   GCI_STATUS  canonical status (success/failed/running/pending/canceled/skipped/
+#   GST_HOST, GST_PATH, GST_BRANCH, GST_PROVIDER, GST_ERR (on error),
+#   GST_STATUS  canonical status (success/failed/running/pending/canceled/skipped/
 #               manual/unknown), or "" when the branch has no pipeline/run,
-#   GCI_CI_ID, GCI_CI_URL, GCI_CI_UPDATED,
-#   GCI_CI_PATH the repo slug the run was actually found in — fork→upstream PRs run CI
-#               in the base repo (defaults to GCI_PATH); pass THIS to gci_failed_ci.
+#   GST_CI_ID, GST_CI_URL, GST_CI_UPDATED,
+#   GST_CI_PATH the repo slug the run was actually found in — fork→upstream PRs run CI
+#               in the base repo (defaults to GST_PATH); pass THIS to gst_failed_ci.
 # Return codes:
 #   0 ok | 1 not-a-git-repo | 2 no-origin | 3 remote-not-parseable
 #   4 unsupported-host (not GitLab/GitHub) | 5 api-error (incl. missing provider CLI)
-gci_latest_ci() {
+gst_latest_ci() {
   local repo="$1" url parsed enc resp run up sha owner name
-  GCI_HOST=""; GCI_PATH=""; GCI_BRANCH=""; GCI_PROVIDER=""; GCI_ERR=""
-  GCI_STATUS=""; GCI_CI_ID=""; GCI_CI_URL=""; GCI_CI_UPDATED=""; GCI_CI_PATH=""; GCI_CI_RESP=""
+  GST_HOST=""; GST_PATH=""; GST_BRANCH=""; GST_PROVIDER=""; GST_ERR=""
+  GST_STATUS=""; GST_CI_ID=""; GST_CI_URL=""; GST_CI_UPDATED=""; GST_CI_PATH=""; GST_CI_RESP=""
   git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
   url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 2
-  parsed="$(gci_parse_remote "$url")" || return 3
-  GCI_HOST="${parsed%%$'\t'*}"; GCI_PATH="${parsed#*$'\t'}"
-  GCI_CI_PATH="$GCI_PATH"
-  GCI_PROVIDER="$(gci_provider "$GCI_HOST")"
-  [ -n "$GCI_PROVIDER" ] || return 4
-  GCI_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  parsed="$(gst_parse_remote "$url")" || return 3
+  GST_HOST="${parsed%%$'\t'*}"; GST_PATH="${parsed#*$'\t'}"
+  GST_CI_PATH="$GST_PATH"
+  GST_PROVIDER="$(gst_provider "$GST_HOST")"
+  [ -n "$GST_PROVIDER" ] || return 4
+  GST_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   # CI is looked up by the LOCAL HEAD COMMIT, never by branch name. A branch name resolves
   # server-side to whatever that branch points at THERE, which is a different commit
   # whenever local is ahead (unpushed work reported as green), on a detached HEAD (the ref
@@ -522,41 +523,41 @@ gci_latest_ci() {
   sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"
   [ -n "$sha" ] || return 0
 
-  if [ "$GCI_PROVIDER" = "gitlab" ]; then
-    command -v glab >/dev/null 2>&1 || { GCI_ERR="glab not found — install it (brew install glab) and run: glab auth login"; return 5; }
-    enc="$(gci_urlencode_path "$GCI_PATH")"
-    resp="$(cd "$repo" && glab api "projects/$enc/pipelines?sha=$sha&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
+  if [ "$GST_PROVIDER" = "gitlab" ]; then
+    command -v glab >/dev/null 2>&1 || { GST_ERR="glab not found — install it (brew install glab) and run: glab auth login"; return 5; }
+    enc="$(gst_urlencode_path "$GST_PATH")"
+    resp="$(cd "$repo" && glab api "projects/$enc/pipelines?sha=$sha&per_page=1" 2>&1)" || { GST_ERR="$resp"; return 5; }
     run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
     # Fork→upstream MRs may run their pipelines in the target project; on no-hit, retry
     # the upstream slug (retry errors are treated as "no pipeline" — origin already answered).
-    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
-      enc="$(gci_urlencode_path "$up")"
+    if [ -z "$run" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GST_PATH" ]; then
+      enc="$(gst_urlencode_path "$up")"
       resp="$(cd "$repo" && glab api "projects/$enc/pipelines?sha=$sha&per_page=1" 2>/dev/null)" \
         && run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)" \
-        && [ -n "$run" ] && GCI_CI_PATH="$up" || true
+        && [ -n "$run" ] && GST_CI_PATH="$up" || true
     fi
     [ -n "$run" ] || return 0
-    GCI_STATUS="$(printf '%s' "$run" | jq -r '.status // "unknown"')"
-    GCI_CI_ID="$(printf '%s' "$run" | jq -r '.id // empty')"
-    GCI_CI_URL="$(printf '%s' "$run" | jq -r '.web_url // empty')"
-    GCI_CI_UPDATED="$(printf '%s' "$run" | jq -r '.updated_at // empty')"
+    GST_STATUS="$(printf '%s' "$run" | jq -r '.status // "unknown"')"
+    GST_CI_ID="$(printf '%s' "$run" | jq -r '.id // empty')"
+    GST_CI_URL="$(printf '%s' "$run" | jq -r '.web_url // empty')"
+    GST_CI_UPDATED="$(printf '%s' "$run" | jq -r '.updated_at // empty')"
   else
-    command -v gh >/dev/null 2>&1 || { GCI_ERR="gh not found — install it (brew install gh) and run: gh auth login"; return 5; }
+    command -v gh >/dev/null 2>&1 || { GST_ERR="gh not found — install it (brew install gh) and run: gh auth login"; return 5; }
     # Read GitHub's OWN status-check rollup for the commit rather than re-aggregating the raw
     # check-run list: the rollup is what the green tick reflects, so it already collapses
     # re-run attempts and drops suites not triggered by the push. The winning context still
     # supplies id/url/updated for the detail pane.
-    owner="${GCI_PATH%%/*}"; name="${GCI_PATH#*/}"
-    if ! resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -f oid="$sha" -f query="$GCI_ROLLUP_QUERY" 2>&1)"; then
-      GCI_ERR="$resp"; return 5
+    owner="${GST_PATH%%/*}"; name="${GST_PATH#*/}"
+    if ! resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -f oid="$sha" -f query="$GST_ROLLUP_QUERY" 2>&1)"; then
+      GST_ERR="$resp"; return 5
     fi
     # A commit the remote does not have (never pushed, or force-pushed away) comes back as a
     # null object rather than an error — that is "no CI", not a failure to report.
-    run="$(printf '%s' "$resp" | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
-      | gci_github_checks_status)"
-    # Keep the response that produced $run: gci_required_status re-aggregates it with a
+    run="$(printf '%s' "$resp" | jq -r --arg req "" "$GST_ROLLUP_TSV_JQ" 2>/dev/null \
+      | gst_github_checks_status)"
+    # Keep the response that produced $run: gst_required_status re-aggregates it with a
     # merge-guard filter, and re-fetching would double this plugin's API cost.
-    GCI_CI_RESP="$resp"
+    GST_CI_RESP="$resp"
     # Fork PRs' `pull_request` check runs attach to the head COMMIT in the BASE repo; on
     # no-hit, retry the upstream slug (retry errors = "no run" — origin already answered).
     #
@@ -564,19 +565,19 @@ gci_latest_ci() {
     # shared, which is exactly the fork-PR case this retry exists for. (Retrying by branch
     # name instead reported upstream's own same-named branch as this checkout's CI — seen
     # live on a fork whose own main had no CI at all, yet showed green.)
-    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
-      resp="$(cd "$repo" && gh api graphql -f owner="${up%%/*}" -f name="${up#*/}" -f oid="$sha" -f query="$GCI_ROLLUP_QUERY" 2>/dev/null)" \
-        && run="$(printf '%s' "$resp" | jq -r --arg req "" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
-          | gci_github_checks_status)" \
-        && [ -n "$run" ] && { GCI_CI_PATH="$up"; GCI_CI_RESP="$resp"; } || true
+    if [ -z "$run" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GST_PATH" ]; then
+      resp="$(cd "$repo" && gh api graphql -f owner="${up%%/*}" -f name="${up#*/}" -f oid="$sha" -f query="$GST_ROLLUP_QUERY" 2>/dev/null)" \
+        && run="$(printf '%s' "$resp" | jq -r --arg req "" "$GST_ROLLUP_TSV_JQ" 2>/dev/null \
+          | gst_github_checks_status)" \
+        && [ -n "$run" ] && { GST_CI_PATH="$up"; GST_CI_RESP="$resp"; } || true
     fi
     [ -n "$run" ] || return 0
-    IFS=$'\t' read -r GCI_STATUS GCI_CI_ID GCI_CI_URL GCI_CI_UPDATED <<<"$run"
+    IFS=$'\t' read -r GST_STATUS GST_CI_ID GST_CI_URL GST_CI_UPDATED <<<"$run"
   fi
   return 0
 }
 
-# jq program mapping a statusCheckRollup response to the TSV gci_github_checks_status reads
+# jq program mapping a statusCheckRollup response to the TSV gst_github_checks_status reads
 # ("status \t conclusion \t id \t url \t updated"), optionally filtered to $req names.
 #
 # The rollup is GitHub's OWN aggregation — the same set its green tick reflects — so using it
@@ -588,7 +589,7 @@ gci_latest_ci() {
 #
 # StatusContexts (legacy commit statuses) are mapped too, keyed on .context instead of .name,
 # so they aggregate and filter exactly like check runs.
-GCI_ROLLUP_QUERY='
+GST_ROLLUP_QUERY='
   query($owner:String!,$name:String!,$oid:GitObjectID!){
     repository(owner:$owner,name:$name){
       object(oid:$oid){ ... on Commit {
@@ -601,7 +602,7 @@ GCI_ROLLUP_QUERY='
     }
   }'
 
-GCI_ROLLUP_TSV_JQ='
+GST_ROLLUP_TSV_JQ='
   def cell:
     if .__typename == "CheckRun" then
       [ ((.status // "") | ascii_downcase), ((.conclusion // "") | ascii_downcase),
@@ -618,138 +619,138 @@ GCI_ROLLUP_TSV_JQ='
   | map(select($names == [] or ((.name // .context) as $n | ($names | index($n)) != null)))
   | .[] | cell | @tsv'
 
-# gci_required_status <rollup_json> <required_names>
+# gst_required_status <rollup_json> <required_names>
 # Re-aggregate ONLY the checks that gate merging. <required_names> is the newline-separated
-# list gci_review_for_mr resolved for the PR; empty means "do not filter" and this prints
+# list gst_review_for_mr resolved for the PR; empty means "do not filter" and this prints
 # nothing. Also prints nothing when none of the required checks has run on this commit yet —
 # callers must treat that as "keep the unfiltered verdict", not as "no CI".
-# Output shape matches gci_github_checks_status: "canonical \t id \t url \t updated".
-gci_required_status() {
+# Output shape matches gst_github_checks_status: "canonical \t id \t url \t updated".
+gst_required_status() {
   [ -n "$2" ] || return 0
-  printf '%s' "$1" | jq -r --arg req "$2" "$GCI_ROLLUP_TSV_JQ" 2>/dev/null \
-    | gci_github_checks_status
+  printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_TSV_JQ" 2>/dev/null \
+    | gst_github_checks_status
 }
 
-# Look up the open MR/PR whose source/head branch is <branch>, dispatching on
-# <provider> ("gitlab"|"github"). Sets globals (NOT stdout): GCI_MR_IID, GCI_MR_URL,
-# GCI_MR_SIGIL ("!" for GitLab, "#" for GitHub), and GCI_MR_PATH — the repo slug the
-# MR/PR was actually found in (fork→upstream PRs live in the upstream repo; pass THIS
-# to gci_review_for_mr) — all "" on error/none. The args come from a prior
-# gci_latest_ci call; <repo> supplies the CLI's host + auth context.
-# Return: 0 found | 1 missing args | 2 api-error | 3 no open MR/PR.
-gci_open_pr() {
+# Look up the open PR whose source/head branch is <branch>, dispatching on
+# <provider> ("gitlab"|"github"). Sets globals (NOT stdout): GST_PR_ID, GST_PR_URL,
+# GST_PR_SIGIL ("!" for GitLab, "#" for GitHub), and GST_PR_PATH — the repo slug the
+# PR was actually found in (fork→upstream PRs live in the upstream repo; pass THIS
+# to gst_review_for_mr) — all "" on error/none. The args come from a prior
+# gst_latest_ci call; <repo> supplies the CLI's host + auth context.
+# Return: 0 found | 1 missing args | 2 api-error | 3 no open PR.
+gst_open_pr() {
   local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner up
-  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""; GCI_MR_PATH=""
+  GST_PR_ID=""; GST_PR_URL=""; GST_PR_SIGIL=""; GST_PR_PATH=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
-  GCI_MR_PATH="$path"
+  GST_PR_PATH="$path"
   if [ "$provider" = "gitlab" ]; then
-    GCI_MR_SIGIL="!"
-    enc="$(gci_urlencode_path "$path")"
+    GST_PR_SIGIL="!"
+    enc="$(gst_urlencode_path "$path")"
     resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" || return 2
-    GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
-    GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+    GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
+    GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
     # Fork→upstream MRs exist only in the TARGET project; on no-hit, retry the upstream slug.
-    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
-      enc="$(gci_urlencode_path "$up")"
+    if [ -z "$GST_PR_ID" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      enc="$(gst_urlencode_path "$up")"
       resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=opened&per_page=1" 2>/dev/null)" \
-        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
-        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
-        && GCI_MR_PATH="$up" || true
+        && GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
+        && GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
+        && GST_PR_PATH="$up" || true
     fi
   elif [ "$provider" = "github" ]; then
-    GCI_MR_SIGIL="#"
+    GST_PR_SIGIL="#"
     owner="${path%%/*}"
     resp="$(cd "$repo" && gh api "repos/$path/pulls?head=$owner:$branch&state=open&per_page=1" 2>/dev/null)" || return 2
-    GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
-    GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+    GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
+    GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
     # Fork→upstream PRs exist only in the BASE repo; on no-hit, retry the upstream slug
     # with the same fork-qualified head filter (<fork_owner>:<branch>).
-    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+    if [ -z "$GST_PR_ID" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
       resp="$(cd "$repo" && gh api "repos/$up/pulls?head=$owner:$branch&state=open&per_page=1" 2>/dev/null)" \
-        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)" \
-        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)" \
-        && GCI_MR_PATH="$up" || true
+        && GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)" \
+        && GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)" \
+        && GST_PR_PATH="$up" || true
     fi
   else
     return 1
   fi
-  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_PATH=""; return 3; }
+  [ -n "$GST_PR_ID" ] || { GST_PR_ID=""; GST_PR_URL=""; GST_PR_PATH=""; return 3; }
   return 0
 }
 
-# Look up the MERGED MR/PR whose source/head branch is <branch>, so a positive "merged" badge
-# can replace the open-PR token once gci_open_pr reports none. Same shape as gci_open_pr: sets
-# globals (NOT stdout) GCI_MR_IID, GCI_MR_URL, GCI_MR_SIGIL ("!" GitLab / "#" GitHub) — all ""
-# on none/error — plus GCI_REVIEW="merged" on success. GitHub's state=closed returns closed
+# Look up the MERGED PR whose source/head branch is <branch>, so a positive "merged" badge
+# can replace the open-PR token once gst_open_pr reports none. Same shape as gst_open_pr: sets
+# globals (NOT stdout) GST_PR_ID, GST_PR_URL, GST_PR_SIGIL ("!" GitLab / "#" GitHub) — all ""
+# on none/error — plus GST_REVIEW="merged" on success. GitHub's state=closed returns closed
 # OR merged PRs, so merged is gated on `.merged_at != null`; GitLab's state=merged is already
 # merged-only. Return: 0 merged | 1 missing args | 2 api-error | 3 not merged.
-gci_merged_pr() {
+gst_merged_pr() {
   local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner up
-  GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_SIGIL=""; GCI_MR_PATH=""; GCI_REVIEW=""
+  GST_PR_ID=""; GST_PR_URL=""; GST_PR_SIGIL=""; GST_PR_PATH=""; GST_REVIEW=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
-  GCI_MR_PATH="$path"
+  GST_PR_PATH="$path"
   if [ "$provider" = "gitlab" ]; then
-    GCI_MR_SIGIL="!"
-    enc="$(gci_urlencode_path "$path")"
+    GST_PR_SIGIL="!"
+    enc="$(gst_urlencode_path "$path")"
     resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=merged&per_page=1" 2>/dev/null)" || return 2
-    GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
-    GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
+    GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)"
+    GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)"
     # Fork→upstream MRs merge in the TARGET project; on no-hit, retry the upstream slug.
-    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
-      enc="$(gci_urlencode_path "$up")"
+    if [ -z "$GST_PR_ID" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+      enc="$(gst_urlencode_path "$up")"
       resp="$(cd "$repo" && glab api "projects/$enc/merge_requests?source_branch=$branch&state=merged&per_page=1" 2>/dev/null)" \
-        && GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
-        && GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
-        && [ -n "$GCI_MR_IID" ] && GCI_MR_PATH="$up" || true
+        && GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].iid // empty' 2>/dev/null)" \
+        && GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].web_url // empty' 2>/dev/null)" \
+        && [ -n "$GST_PR_ID" ] && GST_PR_PATH="$up" || true
     fi
   elif [ "$provider" = "github" ]; then
-    GCI_MR_SIGIL="#"
+    GST_PR_SIGIL="#"
     owner="${path%%/*}"
     resp="$(cd "$repo" && gh api "repos/$path/pulls?head=$owner:$branch&state=closed&per_page=1" 2>/dev/null)" || return 2
     if [ -n "$(printf '%s' "$resp" | jq -r '.[0].merged_at // empty' 2>/dev/null)" ]; then
-      GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
-      GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+      GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
+      GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
     fi
     # Fork→upstream PRs merge in the BASE repo; on no-hit, retry the upstream slug with the
     # same fork-qualified head filter (<fork_owner>:<branch>), still gated on .merged_at.
-    if [ -z "$GCI_MR_IID" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
+    if [ -z "$GST_PR_ID" ] && up="$(gst_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$path" ]; then
       resp="$(cd "$repo" && gh api "repos/$up/pulls?head=$owner:$branch&state=closed&per_page=1" 2>/dev/null)" || resp=""
       if [ -n "$(printf '%s' "$resp" | jq -r '.[0].merged_at // empty' 2>/dev/null)" ]; then
-        GCI_MR_IID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
-        GCI_MR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
-        [ -n "$GCI_MR_IID" ] && GCI_MR_PATH="$up"
+        GST_PR_ID="$(printf '%s' "$resp" | jq -r '.[0].number // empty' 2>/dev/null)"
+        GST_PR_URL="$(printf '%s' "$resp" | jq -r '.[0].html_url // empty' 2>/dev/null)"
+        [ -n "$GST_PR_ID" ] && GST_PR_PATH="$up"
       fi
     fi
   else
     return 1
   fi
-  [ -n "$GCI_MR_IID" ] || { GCI_MR_IID=""; GCI_MR_URL=""; GCI_MR_PATH=""; return 3; }
-  GCI_REVIEW="merged"
+  [ -n "$GST_PR_ID" ] || { GST_PR_ID=""; GST_PR_URL=""; GST_PR_PATH=""; return 3; }
+  GST_REVIEW="merged"
   return 0
 }
 
-# Resolve the canonical review state of a single open MR/PR. Network call; dispatches on
-# <provider>. Sets GCI_REVIEW to conflict|changes|draft|approved|awaiting, or "" on any
+# Resolve the canonical review state of a single open PR. Network call; dispatches on
+# <provider>. Sets GST_REVIEW to conflict|changes|draft|approved|awaiting, or "" on any
 # error/missing data (callers fall back to no glyph). <repo> supplies CLI auth/host context.
 # For GitLab, <path> may be a urlencodable project path OR a numeric project id (both work
 # with the projects/:id/merge_requests/:iid endpoint). For GitHub, <path> is "owner/name".
 # Args: repo path iid provider
-gci_review_for_mr() {
+gst_review_for_mr() {
   local repo="$1" path="$2" iid="$3" provider="$4"
   local enc resp dms blocking draft mergeable decision unresolved standing pending owner name
-  GCI_REVIEW=""
-  # Reset alongside GCI_REVIEW: the poller calls this per space in a loop, and a space with
+  GST_REVIEW=""
+  # Reset alongside GST_REVIEW: the poller calls this per space in a loop, and a space with
   # no PR must never inherit the previous space's required set — two worktrees of the same
   # repo would have matching check names, so a sibling PR's guards would silently filter it.
-  GCI_REQUIRED_NAMES=""
+  GST_REQUIRED_NAMES=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
-    enc="$(gci_urlencode_path "$path")"
+    enc="$(gst_urlencode_path "$path")"
     resp="$(cd "$repo" && glab api "projects/$enc/merge_requests/$iid" 2>/dev/null)" || return 0
     dms="$(printf '%s' "$resp" | jq -r '.detailed_merge_status // empty' 2>/dev/null)"
     [ -n "$dms" ] || return 0
-    blocking="$(gci_gitlab_blocking_resolved "$resp")"
-    GCI_REVIEW="$(gci_gitlab_review_state "$dms" "$blocking")"
+    blocking="$(gst_gitlab_blocking_resolved "$resp")"
+    GST_REVIEW="$(gst_gitlab_review_state "$dms" "$blocking")"
   elif [ "$provider" = "github" ]; then
     owner="${path%%/*}"; name="${path#*/}"
     resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -F number="$iid" -f query='
@@ -786,12 +787,12 @@ gci_review_for_mr() {
            | select(($pend | index($a)) == null) ) ]
       | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
-    GCI_REVIEW="$(gci_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
-    # Names of the checks that actually gate merging, for gci_required_status. Legacy commit
+    GST_REVIEW="$(gst_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
+    # Names of the checks that actually gate merging, for gst_required_status. Legacy commit
     # statuses are keyed on .context rather than .name and are included: the CI verdict now
     # comes from the same statusCheckRollup, which carries them, so a required status filters
     # like any check run instead of having to disable filtering to stay safe.
-    GCI_REQUIRED_NAMES="$(printf '%s' "$resp" | jq -r '
+    GST_REQUIRED_NAMES="$(printf '%s' "$resp" | jq -r '
       [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
         | select(.isRequired == true) | (.name // .context // empty) ] | join("\n")' 2>/dev/null)"
   fi
@@ -802,7 +803,7 @@ gci_review_for_mr() {
 #   state \t !<iid> \t web_url \t project_short \t updated_at
 # <repo> supplies glab auth/host context (defaults to $PWD). No-op (prints nothing) if glab
 # is missing or the current user can't be resolved.
-gci_my_mrs_gitlab() {
+gst_my_mrs_gitlab() {
   local repo="${1:-$PWD}" me resp pid iid url upd proj
   command -v glab >/dev/null 2>&1 || return 0
   me="$(cd "$repo" && glab api user 2>/dev/null | jq -r '.username // empty')"
@@ -810,23 +811,23 @@ gci_my_mrs_gitlab() {
   resp="$(cd "$repo" && glab api "merge_requests?author_username=$me&state=opened&scope=all&per_page=50" 2>/dev/null)" || return 0
   while IFS=$'\t' read -r pid iid url upd; do
     [ -n "$iid" ] || continue
-    gci_review_for_mr "$repo" "$pid" "$iid" "gitlab"
+    gst_review_for_mr "$repo" "$pid" "$iid" "gitlab"
     proj="${url#https://}"; proj="${proj#*/}"; proj="${proj%%/-/*}"; proj="${proj##*/}"
-    printf '%s\t!%s\t%s\t%s\t%s\n' "$GCI_REVIEW" "$iid" "$url" "$proj" "$upd"
+    printf '%s\t!%s\t%s\t%s\t%s\n' "$GST_REVIEW" "$iid" "$url" "$proj" "$upd"
   done < <(printf '%s' "$resp" | jq -r '.[] | [(.project_id|tostring), (.iid|tostring), .web_url, (.updated_at // .created_at)] | @tsv' 2>/dev/null)
 }
 
 # List MY open PRs across all GitHub repos, classified by review state. Emits TSV rows:
 #   state \t #<num> \t html_url \t repo_name \t updated_at
 # <repo> supplies gh auth/host context (defaults to $PWD). No-op if gh is missing.
-gci_my_mrs_github() {
+gst_my_mrs_github() {
   local repo="${1:-$PWD}" resp owner name num url upd
   command -v gh >/dev/null 2>&1 || return 0
   resp="$(cd "$repo" && gh search prs --author=@me --state=open --limit 50 --json number,url,repository,updatedAt 2>/dev/null)" || return 0
   while IFS=$'\t' read -r owner name num url upd; do
     [ -n "$num" ] || continue
-    gci_review_for_mr "$repo" "$owner/$name" "$num" "github"
-    printf '%s\t#%s\t%s\t%s\t%s\n' "$GCI_REVIEW" "$num" "$url" "$name" "$upd"
+    gst_review_for_mr "$repo" "$owner/$name" "$num" "github"
+    printf '%s\t#%s\t%s\t%s\t%s\n' "$GST_REVIEW" "$num" "$url" "$name" "$upd"
   done < <(printf '%s' "$resp" | jq -r '.[] | [(.repository.nameWithOwner|split("/")[0]), (.repository.nameWithOwner|split("/")[1]), (.number|tostring), .url, .updatedAt] | @tsv' 2>/dev/null)
 }
 
@@ -834,12 +835,12 @@ gci_my_mrs_github() {
 #   <id>\t<web_url>\t<updated_at>
 # Args: repo path branch provider [limit]. <repo> supplies the CLI's host + auth context.
 # Empty output = no failures, or a transient API/CLI error (treated as "none" — hard errors
-# are already surfaced by gci_latest_ci, which build_frame checks before calling this).
-gci_failed_ci() {
+# are already surfaced by gst_latest_ci, which build_frame checks before calling this).
+gst_failed_ci() {
   local repo="$1" path="$2" branch="$3" provider="$4" limit="${5:-5}" enc
   [ -n "$path" ] && [ -n "$branch" ] || return 0
   if [ "$provider" = "gitlab" ]; then
-    enc="$(gci_urlencode_path "$path")"
+    enc="$(gst_urlencode_path "$path")"
     (cd "$repo" && glab api "projects/$enc/pipelines?ref=$branch&status=failed&per_page=$limit" 2>/dev/null) \
       | jq -r '.[] | "\(.id)\t\(.web_url)\t\(.updated_at // .created_at)"' 2>/dev/null
   elif [ "$provider" = "github" ]; then

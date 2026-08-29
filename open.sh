@@ -15,7 +15,7 @@ fi
 [ -n "$repo" ] || repo="${HERDR_WORKSPACE_CWD:-}"
 
 if [ -z "$repo" ] || [ ! -d "$repo" ]; then
-  printf 'gitlab-ci-status: could not resolve a repo directory from the workspace context.\n' >&2
+  printf 'git-status: could not resolve a repo directory from the workspace context.\n' >&2
   exit 1
 fi
 
@@ -24,9 +24,9 @@ fi
 # root and bash would fail to find ci-pane.sh (the pane opens then closes instantly).
 # The repo is passed via --env instead, and ci-pane.sh uses `git -C "$REPO"`.
 exec "$herdr_bin" plugin pane open \
-  --plugin gitlab-ci-status \
+  --plugin git-status \
   --entrypoint ci \
   --placement split \
   --direction right \
-  --env "GITLAB_CI_REPO=$repo" \
+  --env "GST_REPO=$repo" \
   --focus
