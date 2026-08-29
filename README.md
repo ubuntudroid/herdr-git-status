@@ -83,6 +83,12 @@ silently disappearing when the MR/PR leaves the open state.
 You only need the CLI for the hosts you actually use (jq + git are always required). On macOS:
 `brew install jq git glab gh`. The plugin stores no tokens of its own — it reuses glab/gh auth.
 
+> **GitLab support is untested.** The maintainer works only against GitHub remotes, so the GitLab
+> code paths — pipeline status, MR lookup, review state, the `sha` pipeline filter — are written
+> from the API docs and exercised only by unit tests with canned responses. They may well be wrong
+> in ways nobody has noticed. Bug reports and pull requests from GitLab users are very welcome; that
+> is the only way this half gets better. The GitHub paths are used daily and are the ones to trust.
+
 ## Install
 
 ```sh
@@ -190,18 +196,27 @@ makes a merge guard. A failing optional check (a lint job, a coverage bot, a pre
 longer shows the space as broken when nothing is actually blocking the merge. A `SKIPPED` required
 check does not veto, matching GitHub's merge box.
 
-**The cell appears whenever CI ran on the branch's remote head**, whether or not anything gates a
-merge — a green `main` is worth seeing. Merge guards only *narrow* the verdict; they are not what
-makes the cell appear. So the unfiltered result stands when the branch has no open PR (required-ness
-is a per-PR fact), when the PR configures no required checks, when none of the required checks has
-run on this commit yet, and when a required check is a **legacy commit status** rather than a check
-run — the REST endpoint the plugin reads returns check runs only and never sees a commit status, so
-filtering by name there could hide a failing required status and report green while the merge is
-blocked.
+**CI is looked up by the commit you have checked out** — the local `HEAD` sha — never by branch
+name. A branch name is resolved by the forge, so it answers about whatever that branch points at
+*there*: a different commit whenever you have unpushed work (green from the last push, attributed to
+code CI never saw), on a detached `HEAD` (GitHub resolves the literal ref `HEAD` to the repository's
+**default branch**), and in a fork whose upstream has a same-named branch. A sha answers only about
+this checkout; if the commit was never pushed the forge has nothing, which is the correct answer
+rather than a borrowed one.
 
-**No cell at all** when no CI ran on that remote head. Note this is the branch's *remote* head, not
-your local one: an unpushed branch has nothing to report, and a fork whose own branch has no runs
-reports nothing rather than borrowing the upstream repo's result for a same-named branch.
+The practical consequence: a checkout far behind its remote shows its *own* CI, which may be old.
+That is a true statement about the code in front of you, where the alternative is a false one about
+code you do not have.
+
+**The cell appears whenever CI ran on that commit**, whether or not anything gates a merge — a green
+`main` is worth seeing. Merge guards only *narrow* the verdict; they are not what makes the cell
+appear. So the unfiltered result stands when the branch has no open PR (required-ness is a per-PR
+fact), when the PR configures no required checks, when none of the required checks has run on this
+commit yet, and when a required check is a **legacy commit status** rather than a check run — the
+REST endpoint the plugin reads returns check runs only and never sees a commit status, so filtering
+by name there could hide a failing required status and report green while the merge is blocked.
+
+**No cell at all** when no CI ran on that commit.
 
 This costs no extra API call: the required names come from the same PR projection that resolves the
 review state. GitLab is unaffected (its merge model has no equivalent per-check required flag), and

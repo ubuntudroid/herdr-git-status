@@ -512,17 +512,26 @@ gci_latest_ci() {
   GCI_PROVIDER="$(gci_provider "$GCI_HOST")"
   [ -n "$GCI_PROVIDER" ] || return 4
   GCI_BRANCH="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  # CI is looked up by the LOCAL HEAD COMMIT, never by branch name. A branch name resolves
+  # server-side to whatever that branch points at THERE, which is a different commit
+  # whenever local is ahead (unpushed work reported as green), on a detached HEAD (the ref
+  # "HEAD" resolves to the repo's DEFAULT BRANCH — verified live), or in a fork whose
+  # upstream has a same-named branch. All three attribute another commit's CI to this
+  # checkout. A sha answers only about the commit actually checked out; if it was never
+  # pushed the forge has nothing, which is the correct answer rather than a borrowed one.
+  sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"
+  [ -n "$sha" ] || return 0
 
   if [ "$GCI_PROVIDER" = "gitlab" ]; then
     command -v glab >/dev/null 2>&1 || { GCI_ERR="glab not found — install it (brew install glab) and run: glab auth login"; return 5; }
     enc="$(gci_urlencode_path "$GCI_PATH")"
-    resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
+    resp="$(cd "$repo" && glab api "projects/$enc/pipelines?sha=$sha&per_page=1" 2>&1)" || { GCI_ERR="$resp"; return 5; }
     run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)"
     # Fork→upstream MRs may run their pipelines in the target project; on no-hit, retry
     # the upstream slug (retry errors are treated as "no pipeline" — origin already answered).
     if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
       enc="$(gci_urlencode_path "$up")"
-      resp="$(cd "$repo" && glab api "projects/$enc/pipelines?ref=$GCI_BRANCH&per_page=1" 2>/dev/null)" \
+      resp="$(cd "$repo" && glab api "projects/$enc/pipelines?sha=$sha&per_page=1" 2>/dev/null)" \
         && run="$(printf '%s' "$resp" | jq -c '.[0] // empty' 2>/dev/null)" \
         && [ -n "$run" ] && GCI_CI_PATH="$up" || true
     fi
@@ -536,8 +545,7 @@ gci_latest_ci() {
     # Aggregate ALL check runs on the branch head (what the PR page shows) — a push can
     # trigger several workflows, and sampling one run (e.g. a skip-conditioned workflow)
     # misreports CI that is actually green/running. The winning run supplies id/url/updated.
-    enc="$(gci_urlencode_path "$GCI_BRANCH")"
-    if ! resp="$(cd "$repo" && gh api "repos/$GCI_PATH/commits/$enc/check-runs?per_page=100" 2>&1)"; then
+    if ! resp="$(cd "$repo" && gh api "repos/$GCI_PATH/commits/$sha/check-runs?per_page=100" 2>&1)"; then
       # A branch that isn't on the remote (yet, or anymore) simply has no CI to report.
       # This endpoint answers 422 "No commit found for SHA" for an unresolvable ref (404
       # only covers a missing repo), and merged branches are typically auto-deleted.
@@ -553,15 +561,11 @@ gci_latest_ci() {
     # Fork PRs' `pull_request` check runs attach to the head COMMIT in the BASE repo; on
     # no-hit, retry the upstream slug (retry errors = "no run" — origin already answered).
     #
-    # Retry by sha, NOT by branch name. The upstream repo has its own branch of the same
-    # name pointing at an unrelated commit, so `commits/<branch>/check-runs` there answers
-    # about upstream's HEAD and reported ITS result as this checkout's — seen live on a fork
-    # of an unmaintained repo whose own main had no CI at all, which then showed green
-    # because upstream's main was green. A sha only resolves upstream when the commit is
-    # genuinely shared, which is exactly the fork-PR case this retry exists for; otherwise
-    # GitHub answers 422 and we correctly report no CI.
-    if [ -z "$run" ] && sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)" && [ -n "$sha" ] \
-       && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
+    # Same sha, different repo: it resolves upstream only when the commit is genuinely
+    # shared, which is exactly the fork-PR case this retry exists for. (Retrying by branch
+    # name instead reported upstream's own same-named branch as this checkout's CI — seen
+    # live on a fork whose own main had no CI at all, yet showed green.)
+    if [ -z "$run" ] && up="$(gci_upstream_path "$repo")" && [ -n "$up" ] && [ "$up" != "$GCI_PATH" ]; then
       resp="$(cd "$repo" && gh api "repos/$up/commits/$sha/check-runs?per_page=100" 2>/dev/null)" \
         && run="$(printf '%s' "$resp" \
           | jq -r '.check_runs[]? | [.status, .conclusion // "", (.id|tostring), .html_url // "", (.completed_at // .started_at // "")] | @tsv' 2>/dev/null \

@@ -342,6 +342,50 @@ check "chk-queued"       "pending	1	u1	t1" "$(printf 'queued\t\t1\tu1\tt1\ncompl
 check "chk-skipped-only" "skipped	1	u1	t1" "$(printf 'completed\tskipped\t1\tu1\tt1\n' | gci_github_checks_status)"
 check "chk-empty"        "" "$(printf '' | gci_github_checks_status)"
 
+# gci_latest_ci looks CI up by the LOCAL HEAD COMMIT, never by branch name. A branch name is
+# resolved by the forge, so it answers about whatever that branch points at THERE — a
+# different commit whenever local is ahead, on a detached HEAD (GitHub resolves the literal
+# ref "HEAD" to the repo's DEFAULT BRANCH), or in a fork whose upstream shares the name.
+sht="$(mktemp -d)"
+git -C "$sht" init -q -b feature/x
+git -C "$sht" remote add origin git@github.com:acme/web-app.git
+git -C "$sht" -c user.email=t@t -c user.name=t commit --allow-empty -q -m one
+git -C "$sht" -c user.email=t@t -c user.name=t commit --allow-empty -q -m two
+shead="$(git -C "$sht" rev-parse HEAD)"
+gh() { printf '%s\n' "$*" >> "$GHLOG"; printf '{"check_runs":[]}'; }
+
+: > "$sht/log"; GHLOG="$sht/log" gci_latest_ci "$sht"
+check "sha-branch-resolved"  "feature/x" "$GCI_BRANCH"
+grep -q "commits/$shead/check-runs" "$sht/log"
+check "sha-queries-head-sha" "0" "$?"
+grep -q 'commits/feature/x/' "$sht/log"
+check "sha-never-branch-name" "1" "$?"
+
+# Detached HEAD: the branch name becomes the literal "HEAD", which the forge would resolve to
+# the default branch — the sha keeps the query pinned to the commit actually checked out.
+git -C "$sht" checkout -q --detach HEAD~1
+sdet="$(git -C "$sht" rev-parse HEAD)"
+: > "$sht/log"; GHLOG="$sht/log" gci_latest_ci "$sht"
+check "sha-detached-branch"  "HEAD" "$GCI_BRANCH"
+grep -q "commits/$sdet/check-runs" "$sht/log"
+check "sha-detached-uses-sha" "0" "$?"
+grep -q 'commits/HEAD/' "$sht/log"
+check "sha-detached-not-ref"  "1" "$?"
+unset -f gh
+
+# GitLab uses the documented `sha` filter on GET /projects/:id/pipelines ("Return pipelines
+# for the specified commit SHA") for the same reason. Untested against a live GitLab.
+git -C "$sht" checkout -q feature/x
+git -C "$sht" remote set-url origin git@gitlab.com:acme/svc.git
+glab() { printf '%s\n' "$*" >> "$GHLOG"; printf '[]'; }
+: > "$sht/log"; GHLOG="$sht/log" gci_latest_ci "$sht"
+grep -q "pipelines?sha=$shead" "$sht/log"
+check "sha-gitlab-uses-sha"  "0" "$?"
+grep -q 'pipelines?ref=' "$sht/log"
+check "sha-gitlab-not-ref"   "1" "$?"
+unset -f glab
+rm -rf "$sht"
+
 # gci_required_status — only merge-guarding checks decide the CI cell. Modelled on
 # Photoroom/content_backend#3397, where "lint / pre_commit" failed while all three required
 # checks passed, turning the whole space red for something that could not block the merge.
