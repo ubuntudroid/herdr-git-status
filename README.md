@@ -429,6 +429,8 @@ original author, and bugs here should be reported here, not upstream.
 > marketplace, or relicensed — and no licence can be declared here, because the derived portions
 > are not the maintainer's to license.
 >
-> A licence request addressed to the original author is drafted in `LICENSE-REQUEST.md` but has
-> **not** been sent yet. If a grant is given, this section will be replaced with the agreed
-> licence. Use it locally at your own discretion in the meantime.
+> A licence has been requested from the original author as a one-file pull request adding MIT:
+> [krystof018/herdr-git-status#14](https://github.com/krystof018/herdr-git-status/pull/14)
+> (opened 2026-08-29, awaiting response). If it is merged, this section will be replaced with the
+> MIT licence and this repository becomes publishable. Use it locally at your own discretion in the
+> meantime.

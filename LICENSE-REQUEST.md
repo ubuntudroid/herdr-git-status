@@ -1,11 +1,14 @@
 # Licence request to the upstream author
 
-**Status:** draft — not yet sent.
-**To:** krystof018 (https://github.com/krystof018)
-**Re:** https://github.com/krystof018/herdr-git-status
+**Status:** SENT 2026-08-29 as a pull request, awaiting response.
+**PR:** https://github.com/krystof018/herdr-git-status/pull/14 — "Add MIT license", one file, based
+on `upstream/main` so the diff contains nothing but `LICENSE`. Merging it is the only action needed
+from the maintainer.
+**To:** Kryštof Prášil / krystof018 (https://github.com/krystof018)
 
-Send this as a GitHub issue on the upstream repo (title: *"Would you consider adding a licence?"*).
-Delete this file once a grant is received and the agreed licence is added as `LICENSE`.
+Delete this file once the PR is merged and the licence is reflected in the README.
+The issue text below is kept as a fallback if the PR goes unanswered and another contact route is
+tried.
 
 ---
 
