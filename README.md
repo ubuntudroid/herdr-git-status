@@ -59,6 +59,14 @@ mergeable · `👀` awaiting review · `🔀` merged. The plugin publishes which
 the rest; which of them you actually see is decided by your `rows` (see
 [Configure the sidebar](#configure-the-sidebar)), not by the plugin.
 
+**`👀` means a review is actually owed.** An open PR that nobody has been asked to review publishes
+*no* review token at all — you get the PR number and the CI dot, and the review cell stays empty
+until a review is genuinely pending. On GitHub that is a pending review request, or a non-empty
+`reviewDecision` (branch protection's own "review required" counts, as does a verdict that exists
+but lost to a higher-priority state). On GitLab it is an assigned reviewer, or `not_approved` —
+approval rules that are not yet met. Solo PRs on your own repo therefore stop showing a permanent
+`👀` that nothing could ever clear.
+
 **Re-requested reviews count.** On GitHub, re-requesting review after addressing feedback hands
 the ball back to that reviewer, so the PR reads `👀` awaiting rather than staying at `💬`. This is
 per reviewer: a standing "changes requested" verdict is retired only if *its own author* is in the
@@ -133,7 +141,9 @@ screen. Drop the `fg`s and it all still works, just uncoloured.
 
 **This is also how you choose what to surface.** The plugin has no opinion any more: omit
 `$gst_review_draft` and `$gst_review_awaiting` and you get the old "only attention + ready" behaviour;
-include them and you can see which PRs are parked with a reviewer.
+include them and you can see which PRs are parked with a reviewer. `$gst_review_awaiting` only ever
+fires when a review is actually pending (a pending request, not merely an open PR), so colouring
+it is safe — it is not a badge every open PR wears.
 
 `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
 paste your own theme's hex rather than the values above. A bare `{ token = "$review" }` with no

@@ -228,17 +228,28 @@ gst_mr_section() {
 
 # GitLab MR -> canonical review state, from `detailed_merge_status` (GitLab 16.0+) with the
 # MR's `blocking_discussions_resolved` flag as a fallback for statuses that don't themselves
-# encode review. Returns: conflict | changes | draft | approved | awaiting.
-# Args: <detailed_merge_status> [blocking_discussions_resolved: true|false]
+# encode review. Returns: conflict | changes | draft | approved | awaiting | "" (no review
+# owed — see the awaiting rule below).
+# Args: <detailed_merge_status> [blocking_discussions_resolved: true|false] [reviewers: int]
 gst_gitlab_review_state() {
-  local dms="$1" blocking="${2:-true}"
+  local dms="$1" blocking="${2:-true}" reviewers="${3:-0}"
   case "$dms" in
     conflict)                 printf 'conflict' ;;
     discussions_not_resolved) printf 'changes' ;;
     draft_status)             printf 'draft' ;;
     mergeable)                printf 'approved' ;;
+    # Approval rules unmet: a review is owed even with no reviewer named. Unresolved
+    # discussions still outrank it (changes > awaiting), as in the fallback below.
+    not_approved)
+      if [ "$blocking" = "false" ]; then printf 'changes'; else printf 'awaiting'; fi ;;
     *)
-      if [ "$blocking" = "false" ]; then printf 'changes'; else printf 'awaiting'; fi
+      # Statuses that say nothing about review (ci_must_pass, ci_still_running, …): an
+      # unresolved discussion still means changes, but "awaiting" needs someone actually
+      # on the hook. An MR with no reviewers assigned is awaiting nobody, so it gets no
+      # glyph rather than a permanent badge.
+      if [ "$blocking" = "false" ]; then printf 'changes'
+      elif [ "${reviewers:-0}" -gt 0 ] 2>/dev/null; then printf 'awaiting'
+      fi
       ;;
   esac
 }
@@ -252,7 +263,8 @@ gst_gitlab_blocking_resolved() {
 }
 
 # GitHub PR -> canonical review state, from a GraphQL pull-request projection. Precedence
-# matches the badge priority (conflict > changes > draft > approved > awaiting).
+# matches the badge priority (conflict > changes > draft > approved > awaiting), and "" when
+# no review is owed at all.
 # Args: <isDraft: true|false> <mergeable: MERGEABLE|CONFLICTING|UNKNOWN>
 #       <reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|''> <unresolved_threads: int>
 #       [standing_changes_reviews: int] [pending_review_requests: int]
@@ -279,7 +291,11 @@ gst_github_review_state() {
   if [ "$decision" = "APPROVED" ] && [ "$mergeable" = "MERGEABLE" ]; then
     printf 'approved'; return
   fi
-  printf 'awaiting'
+  # "Awaiting" means a review is genuinely owed: someone is on the hook (a pending review
+  # request) or GitHub itself says one is (any non-empty reviewDecision — REVIEW_REQUIRED
+  # from branch protection, or a verdict that exists but lost above). A PR nobody was asked
+  # to review is awaiting nobody, so it gets no glyph rather than a permanent badge.
+  if [ "${pending:-0}" -gt 0 ] 2>/dev/null || [ -n "$decision" ]; then printf 'awaiting'; fi
 }
 
 # Remove the CI decoration the poller prepends to a label: a leading status emoji
@@ -401,7 +417,7 @@ gst_token_suffixes() {
 
 # gst_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms>
 # <ci_status> is a canonical CI status ("" = none at all); <review_state> a canonical
-# review state ("" = no PR).
+# review state ("" = no PR, or an open one with no review owed).
 #
 # Every token goes in ONE call. --seq is tracked per (workspace, source) and a report
 # whose seq is <= the last accepted one is silently ignored, so a second call in the
@@ -730,14 +746,15 @@ gst_merged_pr() {
 }
 
 # Resolve the canonical review state of a single open PR. Network call; dispatches on
-# <provider>. Sets GST_REVIEW to conflict|changes|draft|approved|awaiting, or "" on any
-# error/missing data (callers fall back to no glyph). <repo> supplies CLI auth/host context.
+# <provider>. Sets GST_REVIEW to conflict|changes|draft|approved|awaiting, or "" when no
+# review is owed (nobody requested one) and on any error/missing data — callers fall back
+# to no glyph in both cases. <repo> supplies CLI auth/host context.
 # For GitLab, <path> may be a urlencodable project path OR a numeric project id (both work
 # with the projects/:id/merge_requests/:iid endpoint). For GitHub, <path> is "owner/name".
 # Args: repo path iid provider
 gst_review_for_mr() {
   local repo="$1" path="$2" iid="$3" provider="$4"
-  local enc resp dms blocking draft mergeable decision unresolved standing pending owner name
+  local enc resp dms blocking reviewers draft mergeable decision unresolved standing pending owner name
   GST_REVIEW=""
   # Reset alongside GST_REVIEW: the poller calls this per space in a loop, and a space with
   # no PR must never inherit the previous space's required set — two worktrees of the same
@@ -750,7 +767,8 @@ gst_review_for_mr() {
     dms="$(printf '%s' "$resp" | jq -r '.detailed_merge_status // empty' 2>/dev/null)"
     [ -n "$dms" ] || return 0
     blocking="$(gst_gitlab_blocking_resolved "$resp")"
-    GST_REVIEW="$(gst_gitlab_review_state "$dms" "$blocking")"
+    reviewers="$(printf '%s' "$resp" | jq -r '(.reviewers // []) | length' 2>/dev/null)"
+    GST_REVIEW="$(gst_gitlab_review_state "$dms" "$blocking" "${reviewers:-0}")"
   elif [ "$provider" = "github" ]; then
     owner="${path%%/*}"; name="${path#*/}"
     resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -F number="$iid" -f query='

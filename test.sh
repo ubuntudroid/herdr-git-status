@@ -116,9 +116,15 @@ check "gl-discuss"    "changes"  "$(gst_gitlab_review_state discussions_not_reso
 check "gl-draft"      "draft"    "$(gst_gitlab_review_state draft_status)"
 check "gl-mergeable"  "approved" "$(gst_gitlab_review_state mergeable)"
 check "gl-notapprv"   "awaiting" "$(gst_gitlab_review_state not_approved)"
-check "gl-cimust"     "awaiting" "$(gst_gitlab_review_state ci_must_pass)"
+check "gl-notapprv-unblocked" "changes" "$(gst_gitlab_review_state not_approved false)"
+# "Awaiting" needs someone actually on the hook: a status that says nothing about review
+# is awaiting only while the MR has reviewers assigned (approval rules unmet is its own
+# case above). No reviewers -> no glyph, instead of a badge that never clears.
+check "gl-cimust"     ""         "$(gst_gitlab_review_state ci_must_pass)"
+check "gl-cimust-rev" "awaiting" "$(gst_gitlab_review_state ci_must_pass true 1)"
 check "gl-unblocked"  "changes"  "$(gst_gitlab_review_state ci_still_running false)"
-check "gl-blocked-ok" "awaiting" "$(gst_gitlab_review_state ci_still_running true)"
+check "gl-blocked-ok" ""         "$(gst_gitlab_review_state ci_still_running true)"
+check "gl-blocked-rev" "awaiting" "$(gst_gitlab_review_state ci_still_running true 2)"
 
 # gst_gitlab_blocking_resolved — MR JSON -> "true"/"false"; a real false must survive
 # (jq's `//` treats false as falsy and would erase it), missing/null still defaults true.
@@ -134,7 +140,12 @@ check "gh-changes-thr"   "changes"  "$(gst_github_review_state false MERGEABLE R
 check "gh-draft"         "draft"    "$(gst_github_review_state true MERGEABLE REVIEW_REQUIRED 0)"
 check "gh-approved"      "approved" "$(gst_github_review_state false MERGEABLE APPROVED 0)"
 check "gh-awaiting"      "awaiting" "$(gst_github_review_state false MERGEABLE REVIEW_REQUIRED 0)"
-check "gh-unknown"       "awaiting" "$(gst_github_review_state false UNKNOWN '' 0)"
+# Nothing requested, nothing decided -> no review is owed -> no glyph. A non-empty
+# reviewDecision still counts as a request (REVIEW_REQUIRED is branch protection asking).
+check "gh-unknown"       ""         "$(gst_github_review_state false UNKNOWN '' 0)"
+check "gh-no-request"    ""         "$(gst_github_review_state false MERGEABLE '' 0 0 0)"
+check "gh-req-no-dec"    "awaiting" "$(gst_github_review_state false MERGEABLE '' 0 0 1)"
+check "gh-approved-unk"  "awaiting" "$(gst_github_review_state false UNKNOWN APPROVED 0 0 0)"
 check "gh-conflict-wins" "conflict" "$(gst_github_review_state true CONFLICTING CHANGES_REQUESTED 3)"
 # Re-requested review: pending request neutralizes the sticky reviewDecision and unresolved
 # threads (both outlive a re-request), but never a standing CHANGES_REQUESTED review.
