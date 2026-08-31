@@ -38,6 +38,7 @@ ws_list() {
 #   SPACE_STATUS  canonical CI status, or "" (unsupported remote / nothing to say)
 #   SPACE_REVIEW  canonical review state, or "" (no PR)
 #   SPACE_PR      open/merged PR number incl. sigil ("!123" / "#123") or "" (none)
+#   SPACE_AUTOMERGE  "on" when the open PR has auto-merge armed, else ""
 #   SPACE_SKIP    1 on a transient provider error — publish nothing this tick
 # These stay CANONICAL, not display strings: gst_report_tokens turns a state into the
 # token named for it, which is what lets the user colour each state separately.
@@ -45,7 +46,7 @@ ws_list() {
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
   local cwd="$1" rc req names
-  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_SKIP=""
+  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_AUTOMERGE=""; SPACE_SKIP=""
   # Never inherit the previous space's merge guards (see gst_review_for_mr).
   GST_REQUIRED_NAMES=""; GST_PR_BASE=""
   gst_latest_ci "$cwd"; rc=$?
@@ -65,6 +66,7 @@ status_for_repo() {
       if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gst_merged_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; }; then
         [ "$rc" -eq 0 ] && gst_review_for_mr "$cwd" "$GST_PR_PATH" "$GST_PR_ID" "$GST_PROVIDER"
         SPACE_REVIEW="$GST_REVIEW"
+        SPACE_AUTOMERGE="$GST_AUTOMERGE"
         SPACE_PR="$GST_PR_SIGIL$GST_PR_ID"
         # Only merge-guarding checks decide the CI cell: a failing optional check — a lint
         # job, a coverage bot, a preview deploy — is not a reason to show the space as broken
@@ -108,7 +110,7 @@ poll_once() {
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
     cwd="$(gst_pick_pane_cwd "$wsid" "$panes")"
     if [ -z "$cwd" ]; then
-      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_SKIP=""
+      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_AUTOMERGE=""; SPACE_SKIP=""
     else
       status_for_repo "$cwd"
     fi
@@ -116,10 +118,10 @@ poll_once() {
     # its TTL, rather than blanking the sidebar over one failed call.
     [ -n "$SPACE_SKIP" ] && continue
     if [ -n "$DRYRUN" ]; then
-      printf 'would report %s: ci=%q review=%q pr=%q (ttl %sms)\n' \
-        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_PR" "$ttl"
+      printf 'would report %s: ci=%q review=%q pr=%q automerge=%q (ttl %sms)\n' \
+        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_PR" "${SPACE_AUTOMERGE:-–}" "$ttl"
     else
-      gst_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_PR" "$seq" "$ttl"
+      gst_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_PR" "$seq" "$ttl" "$SPACE_AUTOMERGE"
     fi
   done 9< <(ws_list)
 }

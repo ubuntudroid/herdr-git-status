@@ -76,6 +76,12 @@ simultaneously, so the author comparison is what makes this work — counting st
 alone pins such a PR to `💬` forever.) The sticky `reviewDecision` and unresolved threads that
 outlive a pushed fix likewise only count while nothing at all is pending.
 
+**Auto-merge is a separate, optional badge.** When a PR is queued to merge itself once its checks
+pass — GitHub's *auto-merge*, GitLab's *merge when pipeline succeeds* — the plugin publishes a
+`gst_automerge` cell, rendered `A ⏩`. It is orthogonal to the review state (an approved PR can also
+be queued), so it gets its own token rather than competing for the `R` cell. Nothing is published
+when auto-merge is off, and nothing renders at all unless you add `$gst_automerge` to your `rows`.
+
 Once the branch's MR/PR is **merged**, the open-request token is replaced by a `🔀` merged badge
 (e.g. `🔀#123` / `🔀!123`) — a positive signal that the branch landed, instead of the token
 silently disappearing when the MR/PR leaves the open state.
@@ -126,6 +132,7 @@ rows = [
    { token = "$gst_review_merged",   fg = "#bb9af7" },   # …purple
    { token = "$gst_review_awaiting", dim = true },
    { token = "$gst_review_draft",    dim = true },
+   { token = "$gst_automerge",       fg = "#7dcfff" },  # optional: auto-merge armed
    { token = "$gst_pr" },
    "branch", "git_status"],
 ]
@@ -143,7 +150,9 @@ screen. Drop the `fg`s and it all still works, just uncoloured.
 `$gst_review_draft` and `$gst_review_awaiting` and you get the old "only attention + ready" behaviour;
 include them and you can see which PRs are parked with a reviewer. `$gst_review_awaiting` only ever
 fires when a review is actually pending (a pending request, not merely an open PR), so colouring
-it is safe — it is not a badge every open PR wears.
+it is safe — it is not a badge every open PR wears. `$gst_automerge` is opt-in the same way:
+leave it out and auto-merge is invisible; add it and you can tell a PR that will land by itself
+from one still waiting on you.
 
 `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
 paste your own theme's hex rather than the values above. A bare `{ token = "$review" }` with no
@@ -156,7 +165,7 @@ make that row appear on spaces that previously had nothing to show there.
 **Token names are namespaced.** Every token this plugin publishes is prefixed `gst_`, so it
 cannot collide with another plugin's — token names are a single shared namespace across all
 plugins. Override the prefix with `GST_TOKEN_PREFIX` (see [Configuration](#configuration)) and
-mirror it in `rows`; set it to the empty string for bare `ci_ok` / `review_*` / `pr` names.
+mirror it in `rows`; set it to the empty string for bare `ci_ok` / `review_*` / `pr` / `automerge` names.
 
 ## Keybindings (one-time setup)
 
@@ -321,13 +330,17 @@ echo "GST_REFRESH=20" >> "$(herdr plugin config-dir git-status)/.env"
   remote head shows no cell regardless of this setting.
 - `GST_TOKEN_PREFIX` — replaces the default `gst_` prefix on every sidebar token name (`ci_ok`,
   `ci_fail`, `ci_run`, `ci_none`, `review_conflict`, `review_changes`, `review_draft`,
-  `review_approved`, `review_awaiting`, `review_merged`, `pr`). Set it to the empty string for
+  `review_approved`, `review_awaiting`, `review_merged`, `pr`, `automerge`). Set it to the empty string for
   bare, unprefixed names. Token names are one namespace shared by all plugins,
   so set this if another plugin already publishes one of those names — then mirror the prefix in
   `ui.sidebar.spaces.rows`. Default empty.
 - `GST_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
   review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). Each state has its own sidebar
   token, so which of them appear is up to your `rows`.
+- `GST_ICON_AUTOMERGE` — the auto-merge glyph (default `⏩`), rendered as the cell `A ⏩` on a PR
+  queued to merge itself. One flag, not a state family: there is no "off" glyph, a PR nobody
+  queued publishes no cell. Set it empty to hide the glyph while keeping the token published.
+  The octicon counterpart is `nf-oct-git_merge_queue` U+F4DB (see the example below).
 
 Example — GitHub's own octicons instead of emoji, so the sidebar matches what GitHub shows on the
 PR page (needs a Nerd-patched terminal font, otherwise these render as tofu boxes). Codepoints are
@@ -354,6 +367,10 @@ because they do not survive copy-paste through every editor — write them with
 #   APPROVED  nf-oct-check                    U+F42E
 #   AWAITING  nf-oct-dot_fill                 U+F444   (GitHub's "review required")
 #   MERGED    nf-oct-git_merge                U+F419
+
+# Auto-merge cell, GitHub's own merge-queue icon (it sits beside git_merge above, which
+# marks a PR that has already landed):
+#   AUTOMERGE nf-oct-git_merge_queue          U+F4DB
 ```
 
 `dot_fill` deliberately does a lot of work here — every CI state plus "review required" — because
@@ -370,7 +387,9 @@ octicon set has only 19 `_fill` glyphs in total, so a wholly filled set is not a
 **Colours pair with these glyphs in `ui.sidebar.spaces.rows`, not in the plugin.** Following
 GitHub's own status semantics: red for conflict *and* changes-requested (they differ by glyph, as
 on GitHub), yellow for anything pending (CI running and review-required alike), green for
-passing/approved, purple for merged, and theme-default for draft and "no pipeline".
+passing/approved, purple for merged, and theme-default for draft and "no pipeline". Auto-merge is
+none of those — it is not an attention state and not a verdict — so give it a colour the other cells
+do not use (cyan works) rather than borrowing red, yellow, or green.
 
 To change keybindings, edit the `[[keys.command]]` entries in your `config.toml` (see above). For pane
 placement, edit `herdr-plugin.toml` and re-link.

@@ -216,6 +216,17 @@ gst_review_cell() {
   [ -n "$g" ] && printf 'R %s' "$g"
 }
 
+# Auto-merge armed -> the sidebar cell: "A <glyph>". Unlike CI and review this is one flag,
+# not a state family, so there is no "off" glyph: a PR nobody queued gets no cell at all.
+# Overridable via GST_ICON_AUTOMERGE, set-but-empty hides, as everywhere else.
+# Args: <"on" | anything else>
+gst_automerge_cell() {
+  local g
+  [ "$1" = "on" ] || return 0
+  g="${GST_ICON_AUTOMERGE-⏩}"
+  [ -n "$g" ] && printf 'A %s' "$g"
+}
+
 # Canonical review state -> My-PRs pane section: "ready" (approved & mergeable),
 # "action" (conflict or changes), or "" (not surfaced: draft/awaiting/none).
 gst_mr_section() {
@@ -413,11 +424,13 @@ gst_token_suffixes() {
   for b in $GST_CI_BUCKETS;    do printf 'ci_%s\n' "$b"; done
   for st in $GST_REVIEW_STATES; do printf 'review_%s\n' "$st"; done
   printf 'pr\n'
+  printf 'automerge\n'
 }
 
-# gst_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms>
+# gst_report_tokens <ws_id> <ci_status> <review_state> <mr_value> <seq> <ttl_ms> [automerge]
 # <ci_status> is a canonical CI status ("" = none at all); <review_state> a canonical
-# review state ("" = no PR, or an open one with no review owed).
+# review state ("" = no PR, or an open one with no review owed); <automerge> "on" when the
+# PR has auto-merge armed, anything else (including omitted) when it does not.
 #
 # Every token goes in ONE call. --seq is tracked per (workspace, source) and a report
 # whose seq is <= the last accepted one is silently ignored, so a second call in the
@@ -430,7 +443,7 @@ gst_token_suffixes() {
 # An empty value clearing its token is also what makes a set-but-empty
 # GST_ICON_* override hide that glyph rather than render a blank slot.
 gst_report_tokens() {
-  local wsid="$1" status="$2" review="$3" pr="$4" seq="$5" ttl="$6" b st bucket
+  local wsid="$1" status="$2" review="$3" pr="$4" seq="$5" ttl="$6" automerge="${7-}" b st bucket
   local -a args=()
   bucket=""
   [ -n "$status" ] && bucket="$(gst_status_bucket "$status")"
@@ -445,6 +458,7 @@ gst_report_tokens() {
     fi
   done
   args+=(--token "$(gst_token_name pr)=$pr")
+  args+=(--token "$(gst_token_name automerge)=$(gst_automerge_cell "$automerge")")
   "${HERDR_BIN_PATH:-herdr}" workspace report-metadata "$wsid" \
     --source git-status \
     "${args[@]}" \
@@ -738,7 +752,10 @@ gst_open_pr() {
 # merged-only. Return: 0 merged | 1 missing args | 2 api-error | 3 not merged.
 gst_merged_pr() {
   local repo="$1" path="$2" branch="$3" provider="$4" enc resp owner up
-  GST_PR_ID=""; GST_PR_URL=""; GST_PR_SIGIL=""; GST_PR_PATH=""; GST_REVIEW=""
+  # GST_AUTOMERGE resets here too: the poller reaches this function INSTEAD of
+  # gst_review_for_mr when the PR is already merged, so nothing else would clear the
+  # previous space's badge on a merged space.
+  GST_PR_ID=""; GST_PR_URL=""; GST_PR_SIGIL=""; GST_PR_PATH=""; GST_REVIEW=""; GST_AUTOMERGE=""
   [ -n "$path" ] && [ -n "$branch" ] || return 1
   GST_PR_PATH="$path"
   if [ "$provider" = "gitlab" ]; then
@@ -796,7 +813,9 @@ gst_review_for_mr() {
   # no PR must never inherit the previous space's required set — two worktrees of the same
   # repo would have matching check names, so a sibling PR's guards would silently filter it.
   # GST_PR_BASE (the PR's target branch, GitHub only) is the ref whose rules name the guards.
-  GST_REQUIRED_NAMES=""; GST_PR_BASE=""
+  # GST_AUTOMERGE ("on" / "") is per-PR the same way and would otherwise stick to every
+  # later space in the loop.
+  GST_REQUIRED_NAMES=""; GST_PR_BASE=""; GST_AUTOMERGE=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
     enc="$(gst_urlencode_path "$path")"
@@ -806,6 +825,11 @@ gst_review_for_mr() {
     blocking="$(gst_gitlab_blocking_resolved "$resp")"
     reviewers="$(printf '%s' "$resp" | jq -r '(.reviewers // []) | length' 2>/dev/null)"
     GST_REVIEW="$(gst_gitlab_review_state "$dms" "$blocking" "${reviewers:-0}")"
+    # GitLab's auto-merge is "merge when pipeline succeeds" (merge trains set the same flag).
+    # `// empty` would be wrong: jq treats false as falsy, so a disarmed MR would read as
+    # missing rather than off — harmless here, but tostring keeps the two distinguishable.
+    [ "$(printf '%s' "$resp" | jq -r '.merge_when_pipeline_succeeds | tostring' 2>/dev/null)" = "true" ] \
+      && GST_AUTOMERGE="on"
   elif [ "$provider" = "github" ]; then
     owner="${path%%/*}"; name="${path#*/}"
     resp="$(cd "$repo" && gh api graphql -f owner="$owner" -f name="$name" -F number="$iid" -f query='
@@ -816,6 +840,7 @@ gst_review_for_mr() {
             isDraft
             mergeable
             reviewDecision
+            autoMergeRequest { enabledAt }
             reviewThreads(first:100){ nodes { isResolved } }
             reviewRequests(first:100){ totalCount nodes { requestedReviewer { ... on User { login } } } }
             latestOpinionatedReviews(first:100){ nodes { state author { login } } }
@@ -844,6 +869,10 @@ gst_review_for_mr() {
       | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
     GST_REVIEW="$(gst_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
+    # Auto-merge armed: GitHub exposes it as a non-null autoMergeRequest on the PR. Null (or
+    # absent, on an older projection) means nobody queued it.
+    [ -n "$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.autoMergeRequest // empty' 2>/dev/null)" ] \
+      && GST_AUTOMERGE="on"
     GST_PR_BASE="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.baseRefName // empty' 2>/dev/null)"
     # Names of the checks that actually gate merging, for gst_required_status. Legacy commit
     # statuses are keyed on .context rather than .name and are included: the CI verdict now
