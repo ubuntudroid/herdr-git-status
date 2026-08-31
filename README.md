@@ -208,6 +208,15 @@ makes a merge guard. A failing optional check (a lint job, a coverage bot, a pre
 longer shows the space as broken when nothing is actually blocking the merge. A `SKIPPED` required
 check does not veto, matching GitHub's merge box.
 
+**A guard that has not reported yet counts as pending**, not as absent — GitHub's "Expected:
+waiting for status to be reported" blocks the merge exactly like a running check. This needs the
+guard *names* to come from the base branch's rules (`GET /repos/:owner/:repo/rules/branches/:base`,
+which covers rulesets and legacy branch protection and needs no admin scope), because the per-PR
+`isRequired` flags can only mark checks the commit's rollup already carries. A required **gate job**
+— one created only after the jobs it needs finish — is invisible to those flags, so narrowing to
+them alone published green on a PR GitHub had blocked. The two lists are unioned, so a rules
+endpoint that errors falls back to the flags rather than dropping a guard.
+
 **CI is looked up by the commit you have checked out** — the local `HEAD` sha — never by branch
 name. A branch name is resolved by the forge, so it answers about whatever that branch points at
 *there*: a different commit whenever you have unpushed work (green from the last push, attributed to
@@ -232,14 +241,14 @@ runs.
 **The cell appears whenever CI ran on that commit**, whether or not anything gates a merge — a green
 `main` is worth seeing. Merge guards only *narrow* the verdict; they are not what makes the cell
 appear. So the unfiltered result stands when the branch has no open PR (required-ness is a per-PR
-fact), when the PR configures no required checks, and when none of the required checks has run on
-this commit yet.
+fact) and when the PR's base branch configures no required checks.
 
 **No cell at all** when no CI ran on that commit.
 
-This costs no extra API call: the required names come from the same PR projection that resolves the
-review state. GitLab is unaffected (its merge model has no equivalent per-check required flag), and
-the **detail pane still shows every check** — that is where you go to see what actually broke.
+This costs one extra API call per space per tick — the base branch's rules; the `isRequired` flags
+come from the same PR projection that resolves the review state. GitLab is unaffected (its merge
+model has no equivalent per-check required flag), and the **detail pane still shows every check** —
+that is where you go to see what actually broke.
 
 > **Note on branch vs MR/PR pipelines:** status is looked up for the current *branch* (GitLab pipelines
 > by `ref`; GitHub aggregates all check runs on the branch head — the most severe one wins, so one

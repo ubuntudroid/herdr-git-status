@@ -44,10 +44,10 @@ ws_list() {
 # Review state is its own token, not glued to the number: they are separate facts and
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
-  local cwd="$1" rc req
+  local cwd="$1" rc req names
   SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_SKIP=""
   # Never inherit the previous space's merge guards (see gst_review_for_mr).
-  GST_REQUIRED_NAMES=""
+  GST_REQUIRED_NAMES=""; GST_PR_BASE=""
   gst_latest_ci "$cwd"; rc=$?
   case $rc in
     1|2|3|4) return ;;
@@ -71,11 +71,18 @@ status_for_repo() {
         # when nothing is blocking the merge. Required-ness is a per-PR fact (GitHub exposes
         # it as isRequired(pullRequestNumber:)), so this narrowing only applies where a PR
         # exists; a branch with no PR has no merge to guard and every check still counts.
-        if [ -n "$SPACE_STATUS" ] && [ -n "$GST_REQUIRED_NAMES" ] && [ -n "$GST_CI_RESP" ]; then
-          # Narrow to the merge guards when they exist AND have run. An empty result means
-          # none of them has run on this commit yet, so the unfiltered verdict stands rather
-          # than the cell going blank on a branch whose CI demonstrably ran.
-          req="$(gst_required_status "$GST_CI_RESP" "$GST_REQUIRED_NAMES")"
+        # The guard list is the UNION of two sources, because neither alone is complete: the
+        # base branch's rules name every guard including ones that have not reported yet
+        # (without them the cell goes green on a PR GitHub blocks), and the PR's own
+        # isRequired flags survive a rules endpoint that errors. One extra call per space.
+        names=""
+        [ -n "$SPACE_STATUS" ] && [ -n "$GST_CI_RESP" ] && names="$(printf '%s\n%s\n' \
+          "$(gst_required_contexts "$cwd" "$GST_PR_PATH" "$GST_PR_BASE")" \
+          "$GST_REQUIRED_NAMES" | sort -u | sed '/^$/d')"
+        if [ -n "$names" ]; then
+          # A guard that has not reported yet weighs in as pending (see gst_required_status),
+          # so an empty result here now means only a jq failure — keep the unfiltered verdict.
+          req="$(gst_required_status "$GST_CI_RESP" "$names")"
           [ -n "$req" ] && SPACE_STATUS="${req%%$'\t'*}"
         fi
       fi

@@ -635,16 +635,52 @@ GST_ROLLUP_TSV_JQ='
   | map(select($names == [] or ((.name // .context) as $n | ($names | index($n)) != null)))
   | .[] | cell | @tsv'
 
+# jq program emitting one "queued" TSV row per $req name the rollup carries NO context for.
+# Same column shape as GST_ROLLUP_TSV_JQ; id/url/updated are unknown, hence empty.
+GST_ROLLUP_MISSING_JQ='
+  ($req | split("\n") | map(select(length > 0))) as $names
+  | [ (.data.repository.object.statusCheckRollup.contexts.nodes // [])[]
+      | (.name // .context // empty) ] as $have
+  | ($names - $have)[] | ["queued","","","",""] | @tsv'
+
 # gst_required_status <rollup_json> <required_names>
 # Re-aggregate ONLY the checks that gate merging. <required_names> is the newline-separated
-# list gst_review_for_mr resolved for the PR; empty means "do not filter" and this prints
-# nothing. Also prints nothing when none of the required checks has run on this commit yet —
-# callers must treat that as "keep the unfiltered verdict", not as "no CI".
+# list of merge guards for the PR (see gst_required_contexts); empty means "do not filter"
+# and this prints nothing, so the caller keeps the unfiltered verdict.
+#
+# A required name with no row in the rollup counts as PENDING, not as absent: that is
+# GitHub's "Expected — waiting for status to be reported", and it blocks the merge exactly
+# like a running check. Dropping it published green on a PR GitHub had BLOCKED — seen on
+# Photoroom/photoroom_android#7430, whose base branch requires "🚀 Maestro Tests", a gate job
+# that is only created once the maestro run it needs finishes; the commit's rollup carried
+# the two guards that had already passed plus an OPTIONAL in-progress maestro job.
 # Output shape matches gst_github_checks_status: "canonical \t id \t url \t updated".
 gst_required_status() {
   [ -n "$2" ] || return 0
-  printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_TSV_JQ" 2>/dev/null \
-    | gst_github_checks_status
+  { printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_TSV_JQ" 2>/dev/null
+    printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_MISSING_JQ" 2>/dev/null
+  } | gst_github_checks_status
+}
+
+# gst_required_contexts <repo> <path> <base_branch>
+# Newline-separated names of the status checks the BASE branch's rules require, read from
+# GitHub's effective-rules endpoint — it covers rulesets AND legacy branch protection, and
+# needs no admin scope. GitHub-only: prints nothing when <base_branch> is empty (GitLab, or
+# no open PR).
+#
+# This is the authoritative set BECAUSE it names guards that have not reported yet. The
+# isRequired(pullRequestNumber:) flags gst_review_for_mr reads can only mark contexts the
+# commit's rollup already carries, so a gate job created after the jobs it needs finish is
+# invisible there. Callers union the two lists rather than replacing one with the other: this
+# endpoint can fail on a repo whose GraphQL flags work, and losing a guard means a false green.
+gst_required_contexts() {
+  local repo="$1" path="$2" base="$3"
+  [ -n "$path" ] && [ -n "$base" ] || return 0
+  (cd "$repo" && gh api "repos/$path/rules/branches/$(gst_urlencode_path "$base")" 2>/dev/null) \
+    | jq -r 'if type == "array" then
+               [ .[] | select(.type == "required_status_checks")
+                 | .parameters.required_status_checks[]?.context ] | unique | .[]
+             else empty end' 2>/dev/null
 }
 
 # Look up the open PR whose source/head branch is <branch>, dispatching on
@@ -759,7 +795,8 @@ gst_review_for_mr() {
   # Reset alongside GST_REVIEW: the poller calls this per space in a loop, and a space with
   # no PR must never inherit the previous space's required set — two worktrees of the same
   # repo would have matching check names, so a sibling PR's guards would silently filter it.
-  GST_REQUIRED_NAMES=""
+  # GST_PR_BASE (the PR's target branch, GitHub only) is the ref whose rules name the guards.
+  GST_REQUIRED_NAMES=""; GST_PR_BASE=""
   [ -n "$path" ] && [ -n "$iid" ] || return 0
   if [ "$provider" = "gitlab" ]; then
     enc="$(gst_urlencode_path "$path")"
@@ -775,6 +812,7 @@ gst_review_for_mr() {
       query($owner:String!,$name:String!,$number:Int!){
         repository(owner:$owner,name:$name){
           pullRequest(number:$number){
+            baseRefName
             isDraft
             mergeable
             reviewDecision
@@ -806,10 +844,13 @@ gst_review_for_mr() {
       | length' 2>/dev/null)"
     pending="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewRequests.totalCount // 0' 2>/dev/null)"
     GST_REVIEW="$(gst_github_review_state "$draft" "$mergeable" "$decision" "${unresolved:-0}" "${standing:-0}" "${pending:-0}")"
+    GST_PR_BASE="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.baseRefName // empty' 2>/dev/null)"
     # Names of the checks that actually gate merging, for gst_required_status. Legacy commit
     # statuses are keyed on .context rather than .name and are included: the CI verdict now
     # comes from the same statusCheckRollup, which carries them, so a required status filters
     # like any check run instead of having to disable filtering to stay safe.
+    # This list only covers guards the rollup ALREADY carries — callers union it with
+    # gst_required_contexts "$GST_PR_BASE" to also see the ones still waiting to report.
     GST_REQUIRED_NAMES="$(printf '%s' "$resp" | jq -r '
       [ (.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes // [])[]
         | select(.isRequired == true) | (.name // .context // empty) ] | join("\n")' 2>/dev/null)"

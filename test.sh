@@ -448,11 +448,54 @@ check "req-filtered"   "success" "$(gst_required_status "$CR_JSON" "$REQ_3" | cu
 check "req-fail-wins"  "failed"  "$(gst_required_status "$CR_JSON" "$(printf 'django-test\nlint / pre_commit')" | cut -f1)"
 # Empty name list = "do not filter": prints nothing, caller keeps the unfiltered verdict.
 check "req-no-names"   ""        "$(gst_required_status "$CR_JSON" "")"
-# None of the required checks has run on this commit yet: also nothing, so the caller falls
-# back rather than reporting the branch as having no CI.
-check "req-absent"     ""        "$(gst_required_status "$CR_JSON" "not-run-here")"
-# A name is matched whole, not as a substring — "test" must not match "django-test".
-check "req-exact-name" ""        "$(gst_required_status "$CR_JSON" "test")"
+# A required check with no row in the rollup has NOT vanished — it is GitHub's "Expected:
+# waiting for status to be reported", which blocks the merge — so it weighs in as pending.
+check "req-absent"     "pending" "$(gst_required_status "$CR_JSON" "not-run-here" | cut -f1)"
+# A name is matched whole, not as a substring — "test" must not match "django-test"
+# (a substring match would find two passing checks and say success).
+check "req-exact-name" "pending" "$(gst_required_status "$CR_JSON" "test" | cut -f1)"
+# ...and one pending guard is enough: the guards that HAVE passed do not out-vote it.
+# Modelled on Photoroom/photoroom_android#7430 — base release/2026.36.01 requires
+# "🚀 Maestro Tests", a gate job that GitHub only creates once the maestro run it needs
+# finishes, so the rollup carried the two passing guards plus an OPTIONAL in-progress
+# "☁️ Maestro Tests (cloud) / …". Narrowing to the guards that had reported published green
+# while GitHub had the PR BLOCKED.
+GATE_JSON='{"data":{"repository":{"object":{"statusCheckRollup":{"contexts":{"nodes":[
+  {"__typename":"CheckRun","name":"linter","status":"COMPLETED","conclusion":"SUCCESS","databaseId":1,"detailsUrl":"u1","completedAt":"t1"},
+  {"__typename":"CheckRun","name":"🚀 Instrumentation and Unit Tests","status":"COMPLETED","conclusion":"SUCCESS","databaseId":2,"detailsUrl":"u2","completedAt":"t2"},
+  {"__typename":"CheckRun","name":"☁️ Maestro Tests (cloud) / 🤖 Maestro Tests (android-gpu)","status":"IN_PROGRESS","conclusion":null,"databaseId":3,"detailsUrl":"u3","completedAt":null}]}}}}}}'
+GATE_REQ="$(printf 'linter\n🚀 Instrumentation and Unit Tests\n🚀 Maestro Tests')"
+check "req-gate-not-created" "pending" "$(gst_required_status "$GATE_JSON" "$GATE_REQ" | cut -f1)"
+# The same rollup narrowed to only the guards that reported is the old, wrong answer:
+check "req-gate-was-green"   "success" "$(gst_required_status "$GATE_JSON" "$(printf 'linter\n🚀 Instrumentation and Unit Tests')" | cut -f1)"
+
+# gst_required_contexts — the guard NAMES come from the base branch's rules, which is the only
+# source that can name a guard before it reports. The endpoint returns rules from rulesets AND
+# legacy branch protection, so both shapes land in the same required_status_checks parameters.
+RULES_JSON='[{"type":"deletion"},
+  {"type":"pull_request","parameters":{"required_approving_review_count":1}},
+  {"type":"required_status_checks","ruleset_id":7902637,"parameters":{"required_status_checks":[
+    {"context":"🚀 Instrumentation and Unit Tests"},{"context":"🚀 Maestro Tests"},{"context":"linter"}],
+    "strict_required_status_checks_policy":false}}]'
+rct="$(mktemp -d)"
+gh() { printf '%s' "$RULES_JSON"; }
+check "rules-contexts" "$(printf 'linter\n🚀 Instrumentation and Unit Tests\n🚀 Maestro Tests' | sort)" \
+  "$(gst_required_contexts "$rct" "acme/web-app" "release/2026.36.01" | sort)"
+# The branch name is URL-encoded — a "release/x" base must not split the endpoint path.
+gh() { printf '%s\n' "$*" >> "$GHLOG"; printf '[]'; }
+: > "$rct/log"; GHLOG="$rct/log" gst_required_contexts "$rct" "acme/web-app" "release/2026.36.01" >/dev/null
+grep -q 'rules/branches/release%2F2026.36.01' "$rct/log"
+check "rules-branch-encoded" "0" "$?"
+# An error payload (403 on a repo whose GraphQL flags work, 404, rate limit) is not a rule
+# list: print nothing so the caller keeps the isRequired-derived guards instead of treating
+# every one of them as unreported.
+gh() { printf '%s' '{"message":"Not Found","status":"404"}'; }
+check "rules-error-empty" "" "$(gst_required_contexts "$rct" "acme/web-app" "main")"
+# No base branch (GitLab, or no open PR) makes no call at all.
+gh() { printf '%s\n' "called" >> "$GHLOG"; printf '[]'; }
+: > "$rct/log"; GHLOG="$rct/log" gst_required_contexts "$rct" "acme/web-app" "" >/dev/null
+check "rules-no-base-no-call" "" "$(cat "$rct/log")"
+unset -f gh; rm -rf "$rct"
 
 # gst_latest_ci (github) — a commit the remote does not have (never pushed, or force-pushed
 # away) comes back from the rollup query as a NULL object with a successful call. That is
