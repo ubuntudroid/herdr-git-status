@@ -657,13 +657,13 @@ check "rcell-none"     ""     "$(gst_review_cell '')"
 # gst_merge_cell — two mutually exclusive states in one slot. Anything else is
 # no cell at all (not a labelled blank): the sidebar says nothing about a PR nobody queued.
 check "mcell-auto"   "M ⏩" "$(gst_merge_cell auto)"
-check "mcell-done"   "M 🔀" "$(gst_merge_cell done)"
+check "mcell-done"   "M 🔀" "$(gst_merge_cell 'done')"
 check "mcell-off"    ""     "$(gst_merge_cell '')"
 check "mcell-bogus"  ""     "$(gst_merge_cell merged)"
 check "mcell-ov"     "M A"  "$(GST_ICON_AUTOMERGE=A gst_merge_cell auto)"
-check "mcell-done-ov" "M D" "$(GST_ICON_MERGED=D gst_merge_cell done)"
+check "mcell-done-ov" "M D" "$(GST_ICON_MERGED=D gst_merge_cell 'done')"
 check "mcell-hidden" ""     "$(GST_ICON_AUTOMERGE= gst_merge_cell auto)"
-check "mcell-done-hid" ""   "$(GST_ICON_MERGED= gst_merge_cell done)"
+check "mcell-done-hid" ""   "$(GST_ICON_MERGED= gst_merge_cell 'done')"
 
 # Token names: one prefix moves every token out of a colliding plugin's way.
 check "tok-default"  "gst_ci_ok" "$(gst_token_name ci_ok)"
@@ -706,7 +706,7 @@ check "report-merge-auto" "0" "$?"
 # merge fact, not a review verdict.
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" \
-  gst_report_tokens wX success "" "#7" 44 9000 done
+  gst_report_tokens wX success "" "#7" 44 9000 'done'
 grep -q -- '--token gst_merge_auto= --token gst_merge_done=M 🔀 --seq 44' "$ttmp/log"
 check "report-merge-done" "0" "$?"
 # No CI and no PR at all: every token empty, nothing stale left behind.
