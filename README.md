@@ -55,17 +55,24 @@ In the sidebar, those spaces show as `CI 🟢 !123 my-service` and `CI 🟢 R �
 
 The **review state** is its own token, one per canonical state, rendered as `R <glyph>`: `⚠️` merge
 conflict (needs rebase) · `💬` changes requested / unresolved threads · `📝` draft · `✅` approved &
-mergeable · `👀` awaiting review · `🔀` merged. The plugin publishes whichever one applies and clears
+mergeable · `👀` awaiting review (`review_awaiting` when a named reviewer is on the hook,
+`review_required` when only policy is). The plugin publishes whichever one applies and clears
 the rest; which of them you actually see is decided by your `rows` (see
 [Configure the sidebar](#configure-the-sidebar)), not by the plugin.
 
-**`👀` means a review is actually owed.** An open PR that nobody has been asked to review publishes
-*no* review token at all — you get the PR number and the CI dot, and the review cell stays empty
-until a review is genuinely pending. On GitHub that is a pending review request, or a non-empty
-`reviewDecision` (branch protection's own "review required" counts, as does a verdict that exists
-but lost to a higher-priority state). On GitLab it is an assigned reviewer, or `not_approved` —
-approval rules that are not yet met. Solo PRs on your own repo therefore stop showing a permanent
-`👀` that nothing could ever clear.
+**`👀` means a review is actually owed.** An open PR that nobody has been asked to review and that
+no policy gates publishes *no* review token at all — you get the PR number and the CI dot, and the
+review cell stays empty. Solo PRs on your own repo therefore stop showing a permanent `👀` that
+nothing could ever clear.
+
+**Two tokens share the `👀` glyph, so you can colour them apart.** `review_awaiting` means a
+*person* owes you a review: a pending review request on GitHub, an assigned reviewer on GitLab.
+`review_required` means only *policy* does, with nobody asked yet: a non-empty `reviewDecision` on
+GitHub (branch protection's own "review required", or a verdict that exists but lost to a
+higher-priority state), `not_approved` on GitLab (approval rules not yet met). In a repo that
+requires approvals, every open PR carries `review_required` from the moment it opens, which is why
+it is worth dimming while `review_awaiting` keeps an attention colour. The glyph and the
+`GST_ICON_AWAITING` override are shared: only the token name, and so the style, differs.
 
 **Re-requested reviews count.** On GitHub, re-requesting review after addressing feedback hands
 the ball back to that reviewer, so the PR reads `👀` awaiting rather than staying at `💬`. This is
@@ -76,15 +83,18 @@ simultaneously, so the author comparison is what makes this work — counting st
 alone pins such a PR to `💬` forever.) The sticky `reviewDecision` and unresolved threads that
 outlive a pushed fix likewise only count while nothing at all is pending.
 
-**Auto-merge is a separate, optional badge.** When a PR is queued to merge itself once its checks
-pass — GitHub's *auto-merge*, GitLab's *merge when pipeline succeeds* — the plugin publishes a
-`gst_automerge` cell, rendered `A ⏩`. It is orthogonal to the review state (an approved PR can also
-be queued), so it gets its own token rather than competing for the `R` cell. Nothing is published
-when auto-merge is off, and nothing renders at all unless you add `$gst_automerge` to your `rows`.
+**The merge cell is its own slot, rendered `M <glyph>`.** It answers "what is happening to this
+branch's merge", which is not a review verdict, so it never competes for the `R` cell. Two mutually
+exclusive states share it:
 
-Once the branch's MR/PR is **merged**, the open-request token is replaced by a `🔀` merged badge
-(e.g. `🔀#123` / `🔀!123`) — a positive signal that the branch landed, instead of the token
-silently disappearing when the MR/PR leaves the open state.
+- `gst_merge_auto` (`M ⏩`) — the PR is queued to merge itself once its checks pass: GitHub's
+  *auto-merge*, GitLab's *merge when pipeline succeeds*. Orthogonal to the review state, since an
+  approved PR can also be queued.
+- `gst_merge_done` (`M 🔀`) — the branch's MR/PR is **merged**. A positive signal that the branch
+  landed, instead of the review cell silently emptying when the request leaves the open state.
+
+A branch that is neither publishes no merge cell at all, and nothing renders unless you add these
+tokens to your `rows`.
 
 ## Requirements
 
@@ -129,10 +139,11 @@ rows = [
    { token = "$gst_review_conflict", fg = "#f7768e" },
    { token = "$gst_review_changes",  fg = "#e0af68" },
    { token = "$gst_review_approved", fg = "#9ece6a" },
-   { token = "$gst_review_merged",   fg = "#bb9af7" },   # …purple
-   { token = "$gst_review_awaiting", dim = true },
+   { token = "$gst_review_awaiting", fg = "#e0af68" },  # a person owes you a review
+   { token = "$gst_review_required", dim = true },      # only branch protection does
    { token = "$gst_review_draft",    dim = true },
-   { token = "$gst_automerge",       fg = "#7dcfff" },  # optional: auto-merge armed
+   { token = "$gst_merge_auto",      fg = "#7dcfff" },  # optional: will merge itself
+   { token = "$gst_merge_done",      fg = "#bb9af7" },  # optional: merged (…purple)
    { token = "$gst_pr" },
    "branch", "git_status"],
 ]
@@ -147,12 +158,13 @@ every sibling. Only one entry from each group ever renders, so a long-looking ro
 screen. Drop the `fg`s and it all still works, just uncoloured.
 
 **This is also how you choose what to surface.** The plugin has no opinion any more: omit
-`$gst_review_draft` and `$gst_review_awaiting` and you get the old "only attention + ready" behaviour;
-include them and you can see which PRs are parked with a reviewer. `$gst_review_awaiting` only ever
-fires when a review is actually pending (a pending request, not merely an open PR), so colouring
-it is safe — it is not a badge every open PR wears. `$gst_automerge` is opt-in the same way:
-leave it out and auto-merge is invisible; add it and you can tell a PR that will land by itself
-from one still waiting on you.
+`$gst_review_draft`, `$gst_review_awaiting` and `$gst_review_required` and you get the old "only
+attention + ready" behaviour; include them and you can see which PRs are parked with a reviewer.
+`$gst_review_awaiting` only ever fires when a person is actually on the hook, so colouring it is
+safe. `$gst_review_required` *is* a badge every open PR wears in a repo that requires approvals —
+dim it, or leave it out entirely. `$gst_merge_auto` and `$gst_merge_done` are opt-in the same way:
+leave them out and merges are invisible; add them and you can tell a PR that will land by itself,
+or one that already landed, from one still waiting on you.
 
 `fg` takes a strict `#RGB`/`#RRGGBB` literal — herdr does not resolve theme colour names there, so
 paste your own theme's hex rather than the values above. A bare `{ token = "$review" }` with no
@@ -165,7 +177,7 @@ make that row appear on spaces that previously had nothing to show there.
 **Token names are namespaced.** Every token this plugin publishes is prefixed `gst_`, so it
 cannot collide with another plugin's — token names are a single shared namespace across all
 plugins. Override the prefix with `GST_TOKEN_PREFIX` (see [Configuration](#configuration)) and
-mirror it in `rows`; set it to the empty string for bare `ci_ok` / `review_*` / `pr` / `automerge` names.
+mirror it in `rows`; set it to the empty string for bare `ci_ok` / `review_*` / `pr` / `merge_*` names.
 
 ## Keybindings (one-time setup)
 
@@ -330,22 +342,28 @@ echo "GST_REFRESH=20" >> "$(herdr plugin config-dir git-status)/.env"
 ```
 
 - `GST_REFRESH` — refresh interval in seconds (pane default `15`, poller default `30`).
+- `GST_JOBS` — how many spaces the poller polls concurrently (default `6`). A cycle is
+  latency-bound, so this is what keeps it shorter than `GST_REFRESH` once you have more than a
+  handful of spaces; 22 spaces went from ~33s serial to ~8s at the default. Raise it only if your
+  provider tolerates the concurrency — GitHub's secondary rate limit counts parallel requests.
 - `GST_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
   (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot. `_NONE` covers runs that
   finished without a verdict — canceled, skipped, manual, unknown; a branch with no CI at all on its
   remote head shows no cell regardless of this setting.
 - `GST_TOKEN_PREFIX` — replaces the default `gst_` prefix on every sidebar token name (`ci_ok`,
   `ci_fail`, `ci_run`, `ci_none`, `review_conflict`, `review_changes`, `review_draft`,
-  `review_approved`, `review_awaiting`, `review_merged`, `pr`, `automerge`). Set it to the empty string for
+  `review_approved`, `review_awaiting`, `review_required`, `pr`, `merge_auto`, `merge_done`). Set it to
+  the empty string for
   bare, unprefixed names. Token names are one namespace shared by all plugins,
   so set this if another plugin already publishes one of those names — then mirror the prefix in
   `ui.sidebar.spaces.rows`. Default empty.
-- `GST_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` / `_MERGED` —
-  review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀` `🔀`). Each state has its own sidebar
-  token, so which of them appear is up to your `rows`.
-- `GST_ICON_AUTOMERGE` — the auto-merge glyph (default `⏩`), rendered as the cell `A ⏩` on a PR
-  queued to merge itself. One flag, not a state family: there is no "off" glyph, a PR nobody
-  queued publishes no cell. Set it empty to hide the glyph while keeping the token published.
+- `GST_ICON_CONFLICT` / `_CHANGES` / `_APPROVED` / `_DRAFT` / `_AWAITING` —
+  review-state glyphs (defaults `⚠️` `💬` `✅` `📝` `👀`). Each state has its own sidebar
+  token, so which of them appear is up to your `rows`. `review_required` has no knob of its own:
+  it renders `_AWAITING`, since the two states differ by colour rather than by glyph.
+- `GST_ICON_AUTOMERGE` / `_MERGED` — the two merge-cell glyphs (defaults `⏩` `🔀`), rendered
+  `M ⏩` on a PR queued to merge itself and `M 🔀` once the branch has landed. A branch that is
+  neither publishes no cell. Set one empty to hide that glyph while keeping the token published.
   The octicon counterpart is `nf-oct-git_merge_queue` U+F4DB (see the example below).
 
 Example — GitHub's own octicons instead of emoji, so the sidebar matches what GitHub shows on the
@@ -393,9 +411,9 @@ octicon set has only 19 `_fill` glyphs in total, so a wholly filled set is not a
 **Colours pair with these glyphs in `ui.sidebar.spaces.rows`, not in the plugin.** Following
 GitHub's own status semantics: red for conflict *and* changes-requested (they differ by glyph, as
 on GitHub), yellow for anything pending (CI running and review-required alike), green for
-passing/approved, purple for merged, and theme-default for draft and "no pipeline". Auto-merge is
-none of those — it is not an attention state and not a verdict — so give it a colour the other cells
-do not use (cyan works) rather than borrowing red, yellow, or green.
+passing/approved, and theme-default for draft and "no pipeline". The merge cell is none of those —
+neither an attention state nor a verdict — so `merge_auto` takes a colour the other cells do not use
+(cyan works) rather than borrowing red, yellow, or green, and `merge_done` keeps merge purple.
 
 To change keybindings, edit the `[[keys.command]]` entries in your `config.toml` (see above). For pane
 placement, edit `herdr-plugin.toml` and re-link.
@@ -421,6 +439,12 @@ The poller (`poller-ctl.sh run`, launched detached by the `start`/`toggle` actio
 latest run and open MR/PR the same way, and publishes the result with
 `herdr workspace report-metadata --source git-status --token …`. Labels are never written, so
 this plugin cannot collide with another that decorates them.
+
+Spaces are polled **concurrently**, `GST_JOBS` at a time. Each space is an independent chain of
+network calls, so the cycle is latency-bound; a child process handles one space end to end and
+publishes its own tokens, which is why nothing has to be marshalled back to the parent. Batches
+use a plain `wait` rather than `wait -n`, because the daemon's `env bash` may resolve to macOS's
+bash 3.2. `clear_tokens` and `restore_labels` stay serial — they are local and already fast.
 
 Every token goes in one call, because `--seq` is tracked per (workspace, source) and a report whose
 seq is not greater than the last accepted one is silently ignored. The seq is epoch seconds rather

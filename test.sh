@@ -99,9 +99,11 @@ check "rg-changes"  "💬" "$(gst_review_glyph changes)"
 check "rg-draft"    "📝" "$(gst_review_glyph draft)"
 check "rg-approved" "✅" "$(gst_review_glyph approved)"
 check "rg-awaiting" "👀" "$(gst_review_glyph awaiting)"
+# required shares awaiting's glyph and its override knob; only the token name differs.
+check "rg-required" "👀" "$(gst_review_glyph required)"
+check "rg-req-ov"   "E"   "$(GST_ICON_AWAITING=E gst_review_glyph required)"
 check "rg-none"     ""   "$(gst_review_glyph none)"
 check "rg-empty"    ""   "$(gst_review_glyph '')"
-check "rg-merged"   "🔀" "$(gst_review_glyph merged)"
 
 # gst_mr_section — My-PRs pane bucketing
 check "sec-approved" "ready"  "$(gst_mr_section approved)"
@@ -109,13 +111,15 @@ check "sec-conflict" "action" "$(gst_mr_section conflict)"
 check "sec-changes"  "action" "$(gst_mr_section changes)"
 check "sec-draft"    ""       "$(gst_mr_section draft)"
 check "sec-awaiting" ""       "$(gst_mr_section awaiting)"
+check "sec-required" ""       "$(gst_mr_section required)"
 
 # gst_gitlab_review_state — detailed_merge_status [+ blocking_discussions_resolved] -> canonical
 check "gl-conflict"   "conflict" "$(gst_gitlab_review_state conflict)"
 check "gl-discuss"    "changes"  "$(gst_gitlab_review_state discussions_not_resolved)"
 check "gl-draft"      "draft"    "$(gst_gitlab_review_state draft_status)"
 check "gl-mergeable"  "approved" "$(gst_gitlab_review_state mergeable)"
-check "gl-notapprv"   "awaiting" "$(gst_gitlab_review_state not_approved)"
+check "gl-notapprv"   "required" "$(gst_gitlab_review_state not_approved)"
+check "gl-notapprv-rev" "awaiting" "$(gst_gitlab_review_state not_approved true 1)"
 check "gl-notapprv-unblocked" "changes" "$(gst_gitlab_review_state not_approved false)"
 # "Awaiting" needs someone actually on the hook: a status that says nothing about review
 # is awaiting only while the MR has reviewers assigned (approval rules unmet is its own
@@ -139,13 +143,17 @@ check "gh-changes-dec"   "changes"  "$(gst_github_review_state false MERGEABLE C
 check "gh-changes-thr"   "changes"  "$(gst_github_review_state false MERGEABLE REVIEW_REQUIRED 2)"
 check "gh-draft"         "draft"    "$(gst_github_review_state true MERGEABLE REVIEW_REQUIRED 0)"
 check "gh-approved"      "approved" "$(gst_github_review_state false MERGEABLE APPROVED 0)"
-check "gh-awaiting"      "awaiting" "$(gst_github_review_state false MERGEABLE REVIEW_REQUIRED 0)"
+check "gh-required"      "required" "$(gst_github_review_state false MERGEABLE REVIEW_REQUIRED 0)"
+check "gh-awaiting"      "awaiting" "$(gst_github_review_state false MERGEABLE REVIEW_REQUIRED 0 0 1)"
 # Nothing requested, nothing decided -> no review is owed -> no glyph. A non-empty
-# reviewDecision still counts as a request (REVIEW_REQUIRED is branch protection asking).
+# reviewDecision still counts as a request, but one nobody is named for: branch protection
+# asking is `required` (dim), a pending review request is `awaiting` (a person is on the
+# hook). APPROVED with mergeable UNKNOWN lands in `required` too — the verdict lost to the
+# unknown mergeability, and with nobody pending nobody is on the hook.
 check "gh-unknown"       ""         "$(gst_github_review_state false UNKNOWN '' 0)"
 check "gh-no-request"    ""         "$(gst_github_review_state false MERGEABLE '' 0 0 0)"
 check "gh-req-no-dec"    "awaiting" "$(gst_github_review_state false MERGEABLE '' 0 0 1)"
-check "gh-approved-unk"  "awaiting" "$(gst_github_review_state false UNKNOWN APPROVED 0 0 0)"
+check "gh-approved-unk"  "required" "$(gst_github_review_state false UNKNOWN APPROVED 0 0 0)"
 check "gh-conflict-wins" "conflict" "$(gst_github_review_state true CONFLICTING CHANGES_REQUESTED 3)"
 # Re-requested review: pending request neutralizes the sticky reviewDecision and unresolved
 # threads (both outlive a re-request), but never a standing CHANGES_REQUESTED review.
@@ -540,20 +548,20 @@ GH_STUB='{"data":{"repository":{"pullRequest":null}}}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 github
 check "review-gh-missing"  ""         "$GST_REVIEW"
 
-# GST_AUTOMERGE rides along on the same projection — no extra API call. GitHub reports an
+# GST_MERGE rides along on the same projection — no extra API call. GitHub reports an
 # armed auto-merge as a non-null autoMergeRequest; null and absent both mean not armed.
 GH_STUB='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]},"autoMergeRequest":{"enabledAt":"2026-08-31T10:00:00Z"}}}}}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 github
-check "am-gh-on"      "on" "$GST_AUTOMERGE"
+check "am-gh-on"      "auto" "$GST_MERGE"
 GH_STUB='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]},"autoMergeRequest":null}}}}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 github
-check "am-gh-off"     ""   "$GST_AUTOMERGE"
+check "am-gh-off"     ""   "$GST_MERGE"
 # Loop-carried-state guard, same as GST_REQUIRED_NAMES: a space with no PR must not inherit
 # the previous space's badge, or every quiet space would show the last PR's auto-merge.
 GH_STUB='{"data":{"repository":{"pullRequest":{"isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"APPROVED","reviewThreads":{"nodes":[]},"autoMergeRequest":{"enabledAt":"2026-08-31T10:00:00Z"}}}}}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 github   # arms it
 gst_review_for_mr "$PWD" "" "" github               # no PR: must reset
-check "am-not-loop-carried" "" "$GST_AUTOMERGE"
+check "am-not-loop-carried" "" "$GST_MERGE"
 unset -f gh
 
 # GitLab's equivalent is merge_when_pipeline_succeeds on the MR the review lookup already
@@ -561,20 +569,25 @@ unset -f gh
 glab() { printf '%s' "$GLAB_STUB"; }
 GLAB_STUB='{"detailed_merge_status":"mergeable","merge_when_pipeline_succeeds":true}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 gitlab
-check "am-gl-on"      "on" "$GST_AUTOMERGE"
+check "am-gl-on"      "auto" "$GST_MERGE"
 check "am-gl-review"  "approved" "$GST_REVIEW"
 GLAB_STUB='{"detailed_merge_status":"mergeable","merge_when_pipeline_succeeds":false}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 gitlab
-check "am-gl-off"     ""   "$GST_AUTOMERGE"
+check "am-gl-off"     ""   "$GST_MERGE"
 GLAB_STUB='{"detailed_merge_status":"mergeable"}'
 gst_review_for_mr "$PWD" "acme/web-app" 41 gitlab
-check "am-gl-absent"  ""   "$GST_AUTOMERGE"
+check "am-gl-absent"  ""   "$GST_MERGE"
 # A merged PR skips gst_review_for_mr entirely (the poller only calls it on an OPEN one), so
-# gst_merged_pr owns the reset — otherwise a merged space would keep the last space's badge.
-GST_AUTOMERGE=on
+# gst_merged_pr owns both sides: it publishes `done` on a hit, and it clears a previous
+# space's `auto` on a miss — otherwise a merged space would keep the last space's badge.
+GST_MERGE=auto
 GLAB_STUB='[{"iid":9,"web_url":"https://gl.example/acme/web-app/-/merge_requests/9"}]'
 gst_merged_pr "$PWD" "acme/web-app" some-branch gitlab
-check "am-merged-resets" "" "$GST_AUTOMERGE"
+check "am-merged-done" "done" "$GST_MERGE"
+GST_MERGE=auto
+GLAB_STUB='[]'
+gst_merged_pr "$PWD" "acme/web-app" some-branch gitlab
+check "am-merged-resets" "" "$GST_MERGE"
 unset -f glab
 
 # Configurable icons — GST_ICON_* overrides (defaults are pinned by the em-*/rg-*/rb-*
@@ -635,17 +648,22 @@ check "cell-hidden"  ""      "$(GST_ICON_NONE= gst_ci_cell canceled)"
 # gst_review_cell — labelled like the CI cell; a hidden glyph stays fully hidden.
 check "rcell-approved" "R ✅" "$(gst_review_cell approved)"
 check "rcell-changes"  "R 💬" "$(gst_review_cell changes)"
-check "rcell-merged"   "R 🔀" "$(gst_review_cell merged)"
 check "rcell-ov"       "R A"  "$(GST_ICON_APPROVED=A gst_review_cell approved)"
+check "rcell-required" "R 👀" "$(gst_review_cell required)"
 check "rcell-hidden"   ""     "$(GST_ICON_AWAITING= gst_review_cell awaiting)"
+check "rcell-req-hid"  ""     "$(GST_ICON_AWAITING= gst_review_cell required)"
 check "rcell-none"     ""     "$(gst_review_cell '')"
 
-# gst_automerge_cell — a badge only while auto-merge is actually armed. Anything else is
+# gst_merge_cell — two mutually exclusive states in one slot. Anything else is
 # no cell at all (not a labelled blank): the sidebar says nothing about a PR nobody queued.
-check "acell-on"     "A ⏩" "$(gst_automerge_cell on)"
-check "acell-off"    ""     "$(gst_automerge_cell '')"
-check "acell-ov"     "A M"  "$(GST_ICON_AUTOMERGE=M gst_automerge_cell on)"
-check "acell-hidden" ""     "$(GST_ICON_AUTOMERGE= gst_automerge_cell on)"
+check "mcell-auto"   "M ⏩" "$(gst_merge_cell auto)"
+check "mcell-done"   "M 🔀" "$(gst_merge_cell done)"
+check "mcell-off"    ""     "$(gst_merge_cell '')"
+check "mcell-bogus"  ""     "$(gst_merge_cell merged)"
+check "mcell-ov"     "M A"  "$(GST_ICON_AUTOMERGE=A gst_merge_cell auto)"
+check "mcell-done-ov" "M D" "$(GST_ICON_MERGED=D gst_merge_cell done)"
+check "mcell-hidden" ""     "$(GST_ICON_AUTOMERGE= gst_merge_cell auto)"
+check "mcell-done-hid" ""   "$(GST_ICON_MERGED= gst_merge_cell done)"
 
 # Token names: one prefix moves every token out of a colliding plugin's way.
 check "tok-default"  "gst_ci_ok" "$(gst_token_name ci_ok)"
@@ -676,13 +694,21 @@ grep -q -- '--token gst_ci_run=CI 🟡' "$ttmp/log";        check "report-ci-liv
 grep -q -- '--token gst_ci_ok= --token gst_ci_fail= ' "$ttmp/log"; check "report-ci-siblings-cleared" "0" "$?"
 grep -q -- '--token gst_review_changes=R 💬' "$ttmp/log"; check "report-review-live-state" "0" "$?"
 grep -q -- '--token gst_review_approved= ' "$ttmp/log";   check "report-review-siblings-cleared" "0" "$?"
-grep -q -- '--token gst_pr=#7 --token gst_automerge= --seq 42 --ttl-ms 9000' "$ttmp/log"; check "report-tail" "0" "$?"
-# Auto-merge is a single token, not a state family: armed publishes the cell, anything else
-# publishes empty, which clears it. The trailing arg is optional so older calls still work.
+grep -q -- '--token gst_pr=#7 --token gst_merge_auto= --token gst_merge_done= --seq 42 --ttl-ms 9000' "$ttmp/log"; check "report-tail" "0" "$?"
+# Merge is a state family like CI and review: the live state publishes its cell and every
+# sibling is sent empty, which clears it. The trailing arg is optional so older calls work.
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" \
-  gst_report_tokens wX success approved "#7" 43 9000 on
-grep -q -- '--token gst_automerge=A ⏩ --seq 43' "$ttmp/log"; check "report-automerge-on" "0" "$?"
+  gst_report_tokens wX success approved "#7" 43 9000 auto
+grep -q -- '--token gst_merge_auto=M ⏩ --token gst_merge_done= --seq 43' "$ttmp/log"
+check "report-merge-auto" "0" "$?"
+# A merged branch: the merge cell carries it and the review cell stays empty — merged is a
+# merge fact, not a review verdict.
+: > "$ttmp/log"
+HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" \
+  gst_report_tokens wX success "" "#7" 44 9000 done
+grep -q -- '--token gst_merge_auto= --token gst_merge_done=M 🔀 --seq 44' "$ttmp/log"
+check "report-merge-done" "0" "$?"
 # No CI and no PR at all: every token empty, nothing stale left behind.
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" gst_report_tokens wX "" "" "" 44 9000
@@ -693,10 +719,10 @@ check "report-empty-state-clears-all" "0" "$?"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" gst_clear_tokens wX 43
 for _t in gst_ci_ok gst_ci_fail gst_ci_run gst_ci_none gst_review_conflict \
           gst_review_changes gst_review_draft gst_review_approved gst_review_awaiting \
-          gst_review_merged gst_pr gst_automerge; do
+          gst_review_required gst_pr gst_merge_auto gst_merge_done; do
   grep -q -- "--clear-token $_t" "$ttmp/log" || { check "clear-covers-$_t" "0" "1"; }
 done
-check "clear-covers-every-token" "12" "$(grep -o -- '--clear-token' "$ttmp/log" | wc -l | tr -d ' ')"
+check "clear-covers-every-token" "13" "$(grep -o -- '--clear-token' "$ttmp/log" | wc -l | tr -d ' ')"
 
 # poll-once publishes tokens and NEVER renames — the whole point of the migration. The
 # fake workspace carries a label decorated by a pre-token version ("🟢 #12 proj"); the old
@@ -706,7 +732,7 @@ tctl() { env HERDR_PLUGIN_STATE_DIR="$ttmp/state" HERDR_PLUGIN_CONFIG_DIR="$ttmp
              bash "$DIR/poller-ctl.sh" "$@"; }
 
 : > "$ttmp/log"; tctl poll-once >/dev/null 2>&1
-grep -q -- 'report-metadata wT --source git-status --token gst_ci_ok= --token gst_ci_fail= --token gst_ci_run= --token gst_ci_none= --token gst_review_conflict= --token gst_review_changes= --token gst_review_draft= --token gst_review_approved= --token gst_review_awaiting= --token gst_review_merged= --token gst_pr= --token gst_automerge= --seq' "$ttmp/log"
+grep -q -- 'report-metadata wT --source git-status --token gst_ci_ok= --token gst_ci_fail= --token gst_ci_run= --token gst_ci_none= --token gst_review_conflict= --token gst_review_changes= --token gst_review_draft= --token gst_review_approved= --token gst_review_awaiting= --token gst_review_required= --token gst_pr= --token gst_merge_auto= --token gst_merge_done= --seq' "$ttmp/log"
 check "poll-reports-all-tokens" "0" "$?"
 check "poll-single-report" "1" "$(grep -c 'report-metadata' "$ttmp/log")"
 grep -q -- '--ttl-ms 90000' "$ttmp/log"

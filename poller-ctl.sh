@@ -5,6 +5,7 @@
 #
 # Env:
 #   GST_REFRESH   poll interval seconds (default 30)
+#   GST_JOBS      spaces polled concurrently per cycle (default 6)
 #   GST_DRYRUN    if set, print intended token reports instead of publishing them
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,6 +22,11 @@ INTERVAL="${GST_REFRESH:-30}"
 # report whose --seq repeats the last accepted one is silently dropped — so the sidebar
 # would freeze rather than poll fast. Clamp to the default instead.
 case "$INTERVAL" in ''|*[!0-9]*|0) INTERVAL=30 ;; esac
+# Spaces are independent network round trips, so a cycle is latency-bound, not CPU-bound:
+# polling them concurrently is what keeps a cycle shorter than the interval once there are
+# more than a handful of spaces. Capped because the providers rate-limit on concurrency.
+JOBS="${GST_JOBS:-6}"
+case "$JOBS" in ''|*[!0-9]*|0) JOBS=6 ;; esac
 DRYRUN="${GST_DRYRUN:-}"
 CYCLE_SECS=0          # duration of the last completed poll; 0 until one finishes
 START_HEAL_SECS="${GST_START_HEAL_SECS:-5}"   # `start` watches this long, relaunching if the daemon dies
@@ -38,7 +44,8 @@ ws_list() {
 #   SPACE_STATUS  canonical CI status, or "" (unsupported remote / nothing to say)
 #   SPACE_REVIEW  canonical review state, or "" (no PR)
 #   SPACE_PR      open/merged PR number incl. sigil ("!123" / "#123") or "" (none)
-#   SPACE_AUTOMERGE  "on" when the open PR has auto-merge armed, else ""
+#   SPACE_MERGE   "auto" when the open PR has auto-merge armed, "done" when the branch's PR
+#                 is already merged, else ""
 #   SPACE_SKIP    1 on a transient provider error — publish nothing this tick
 # These stay CANONICAL, not display strings: gst_report_tokens turns a state into the
 # token named for it, which is what lets the user colour each state separately.
@@ -46,7 +53,7 @@ ws_list() {
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
   local cwd="$1" rc mrc req names
-  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_AUTOMERGE=""; SPACE_SKIP=""
+  SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_MERGE=""; SPACE_SKIP=""
   # Never inherit the previous space's merge guards (see gst_review_for_mr).
   GST_REQUIRED_NAMES=""; GST_PR_BASE=""
   gst_latest_ci "$cwd"; rc=$?
@@ -71,7 +78,7 @@ status_for_repo() {
       if [ "$rc" -eq 0 ] || [ "$mrc" -eq 0 ]; then
         [ "$rc" -eq 0 ] && gst_review_for_mr "$cwd" "$GST_PR_PATH" "$GST_PR_ID" "$GST_PROVIDER"
         SPACE_REVIEW="$GST_REVIEW"
-        SPACE_AUTOMERGE="$GST_AUTOMERGE"
+        SPACE_MERGE="$GST_MERGE"
         SPACE_PR="$GST_PR_SIGIL$GST_PR_ID"
         # Only merge-guarding checks decide the CI cell: a failing optional check — a lint
         # job, a coverage bot, a preview deploy — is not a reason to show the space as broken
@@ -106,7 +113,7 @@ status_for_repo() {
 # if the loop fed them via stdin they would consume it and truncate the loop after the
 # first space. The pane list is fetched once per poll and reused for all spaces.
 poll_once() {
-  local panes wsid cwd seq ttl
+  local panes wsid cwd seq ttl running
   panes="$("$HERDR" pane list 2>/dev/null)"
   # seq is epoch seconds, NOT a per-start counter: herdr ignores a report whose seq is
   # <= the last one accepted for this (workspace, source), so a counter restarting at 0
@@ -114,26 +121,42 @@ poll_once() {
   # enough — the next cycle is at least INTERVAL seconds later.
   seq="$(date +%s)"
   ttl="$(gst_ttl_ms "$CYCLE_SECS" "$INTERVAL")"
+  running=0
   while IFS=$'\t' read -r wsid _ <&9; do
     [ -n "$wsid" ] || continue
     # Resolve the space's repo from a real terminal pane, skipping plugin panes (e.g. the
     # status-bar pane, which sits on top of the layout but lives in a remote-less plugin dir).
+    # Stays in the parent: it is pure string work on the pane list, no network.
     cwd="$(gst_pick_pane_cwd "$wsid" "$panes")"
-    if [ -z "$cwd" ]; then
-      SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_AUTOMERGE=""; SPACE_SKIP=""
-    else
-      status_for_repo "$cwd"
-    fi
-    # Transient API error: publish nothing and let the already-published value ride out
-    # its TTL, rather than blanking the sidebar over one failed call.
-    [ -n "$SPACE_SKIP" ] && continue
-    if [ -n "$DRYRUN" ]; then
-      printf 'would report %s: ci=%q review=%q pr=%q automerge=%q (ttl %sms)\n' \
-        "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_PR" "${SPACE_AUTOMERGE:-–}" "$ttl"
-    else
-      gst_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_PR" "$seq" "$ttl" "$SPACE_AUTOMERGE"
-    fi
+    # One child per space, each publishing its OWN tokens — SPACE_* cannot cross a subshell
+    # boundary, and having the child report directly means there is nothing to marshal back.
+    # fd 9 is closed in the child so a future `read` in there cannot eat the space list.
+    (
+      exec 9<&-
+      if [ -z "$cwd" ]; then
+        SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_MERGE=""; SPACE_SKIP=""
+      else
+        status_for_repo "$cwd"
+      fi
+      # Transient API error: publish nothing and let the already-published value ride out
+      # its TTL, rather than blanking the sidebar over one failed call. `exit`, not
+      # `continue`: the loop is in the parent, so `continue` would be meaningless here.
+      [ -n "$SPACE_SKIP" ] && exit 0
+      if [ -n "$DRYRUN" ]; then
+        printf 'would report %s: ci=%q review=%q pr=%q merge=%q (ttl %sms)\n' \
+          "$wsid" "${SPACE_STATUS:-–}" "${SPACE_REVIEW:-–}" "$SPACE_PR" "${SPACE_MERGE:-–}" "$ttl"
+      else
+        gst_report_tokens "$wsid" "$SPACE_STATUS" "$SPACE_REVIEW" "$SPACE_PR" "$seq" "$ttl" "$SPACE_MERGE"
+      fi
+    ) &
+    # Batches of JOBS with a plain `wait`: macOS /bin/bash is 3.2, which has no `wait -n`,
+    # and the shebang is `env bash` so the version is whatever the daemon's PATH resolves.
+    # ponytail: one slow space stalls its whole batch; move to `wait -n` if bash >= 4.3
+    # ever becomes guaranteed here.
+    running=$(( running + 1 ))
+    if [ "$running" -ge "$JOBS" ]; then wait; running=0; fi
   done 9< <(ws_list)
+  wait
 }
 
 clear_tokens() {
