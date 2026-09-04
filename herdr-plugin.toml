@@ -2,7 +2,7 @@
 # tied to either. Renamed from the upstream "gitlab-ci-status" (see README credits).
 id = "git-status"
 name = "Git CI + Review Status"
-version = "0.4.0"
+version = "0.9.0"
 min_herdr_version = "0.8.0"   # workspace report-metadata (sidebar tokens)
 description = "CI and code-review status for GitHub and GitLab in herdr: a live colored dot, PR number, and review-state glyph published as `gst_ci_*`/`gst_review_*`/`gst_pr` sidebar metadata tokens (labels are never touched), plus on-demand CI-detail and 'My PRs' panes. Auto-detects the provider from the repo's origin host."
 platforms = ["linux", "macos"]
