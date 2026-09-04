@@ -249,10 +249,15 @@ runs.
 
 **The cell appears whenever CI ran on that commit**, whether or not anything gates a merge — a green
 `main` is worth seeing. Merge guards only *narrow* the verdict; they are not what makes the cell
-appear. So the unfiltered result stands when the branch has no open PR (required-ness is a per-PR
-fact) and when the PR's base branch configures no required checks.
+appear. So the unfiltered result stands when the branch has no open PR — a default branch, or one whose PR
+is already merged (required-ness is a per-PR fact) and when the PR's base branch configures no required checks.
 
-**No cell at all** when no CI ran on that commit.
+**No cell at all** when no CI ran on that commit, or when the branch has **no PR at all** — no open
+one and no merged one — and is not the repo's **default branch**. CI nobody is waiting on is noise
+in a row that has space only for what needs acting on; on the default branch (read from the local
+`origin/HEAD` ref, so no extra call) green is the whole point, and it never gets a PR of its own, so
+that branch keeps its cell. A PR lookup that *errors* is not an answer: the cell keeps its previous
+value rather than flickering off for a tick.
 
 This costs one extra API call per space per tick — the base branch's rules; the `isRequired` flags
 come from the same PR projection that resolves the review state. GitLab is unaffected (its merge
@@ -262,7 +267,8 @@ that is where you go to see what actually broke.
 > **Note on branch vs MR/PR pipelines:** status is looked up for the current *branch* (GitLab pipelines
 > by `ref`; GitHub aggregates all check runs on the branch head — the most severe one wins, so one
 > skipped workflow can't mask a green or running push). GitLab projects that run CI only as merge-request
-> pipelines (common in some GitLab setups) show ⚪ on a feature branch until it has a branch pipeline.
+> pipelines (common in some GitLab setups) show ⚪ on a feature branch with an open MR until that branch
+has a branch pipeline.
 
 ## Autostart after reboot
 

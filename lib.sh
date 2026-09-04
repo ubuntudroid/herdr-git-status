@@ -519,6 +519,23 @@ gst_upstream_path() {
   printf '%s\n' "${upp#*$'\t'}"
 }
 
+# Is <branch> perennial — long-lived, and therefore never the head of a PR of its own?
+# Answered from the repo's DEFAULT branch (origin/HEAD), a local ref: no network call and no
+# extra process, which matters in a loop that runs per space every poll. `git clone` writes
+# that ref, a hand-added remote does not, so fall back to the conventional names — calling a
+# perennial branch a feature branch would hide the CI cell that matters most.
+# Return: 0 perennial | 1 not.
+gst_is_perennial() {
+  local repo="$1" branch="$2" head
+  [ -n "$branch" ] || return 1
+  head="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
+  if [ -n "$head" ]; then
+    [ "${head#origin/}" = "$branch" ]
+    return
+  fi
+  case "$branch" in main|master) return 0 ;; *) return 1 ;; esac
+}
+
 # Resolve a repo's latest CI state for its current branch, dispatching on the remote
 # provider (GitLab pipelines via glab, GitHub Actions runs via gh). Returns everything
 # via globals (NOT stdout) so it can be called without a subshell:

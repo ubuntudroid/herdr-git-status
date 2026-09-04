@@ -45,7 +45,7 @@ ws_list() {
 # Review state is its own token, not glued to the number: they are separate facts and
 # the user's rows decide whether to show one, the other, or both.
 status_for_repo() {
-  local cwd="$1" rc req names
+  local cwd="$1" rc mrc req names
   SPACE_STATUS=""; SPACE_REVIEW=""; SPACE_PR=""; SPACE_AUTOMERGE=""; SPACE_SKIP=""
   # Never inherit the previous space's merge guards (see gst_review_for_mr).
   GST_REQUIRED_NAMES=""; GST_PR_BASE=""
@@ -63,7 +63,12 @@ status_for_repo() {
       # here (not inside the old `if gst_open_pr`) because a merged PR returns rc 3 by definition,
       # so gluing it to the open-PR success path would make it unreachable in the case it covers.
       gst_open_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; rc=$?
-      if [ "$rc" -eq 0 ] || { [ "$rc" -eq 3 ] && gst_merged_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; }; then
+      # The merged lookup runs outside the `if` so its own return code survives: rc 3 (no
+      # merged PR either) is the only proof there is no PR at all, which the CI guard below
+      # needs; rc 2 is an api error and must not be read as an answer.
+      mrc=1
+      [ "$rc" -eq 3 ] && { gst_merged_pr "$cwd" "$GST_PATH" "$GST_BRANCH" "$GST_PROVIDER"; mrc=$?; }
+      if [ "$rc" -eq 0 ] || [ "$mrc" -eq 0 ]; then
         [ "$rc" -eq 0 ] && gst_review_for_mr "$cwd" "$GST_PR_PATH" "$GST_PR_ID" "$GST_PROVIDER"
         SPACE_REVIEW="$GST_REVIEW"
         SPACE_AUTOMERGE="$GST_AUTOMERGE"
@@ -87,6 +92,11 @@ status_for_repo() {
           req="$(gst_required_status "$GST_CI_RESP" "$names")"
           [ -n "$req" ] && SPACE_STATUS="${req%%$'\t'*}"
         fi
+      elif [ "$rc" -eq 3 ] && [ "$mrc" -eq 3 ]; then
+        # No PR at all, open or merged: nothing is waiting on this CI, so the cell is noise
+        # in a sidebar row that only has room for what needs acting on. A perennial branch is
+        # the exception — it never gets a PR, so suppressing there would hide its CI forever.
+        gst_is_perennial "$cwd" "$GST_BRANCH" || SPACE_STATUS=""
       fi
       ;;
   esac

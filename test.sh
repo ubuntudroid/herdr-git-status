@@ -317,6 +317,22 @@ check "up-other-host"  ""         "$(gst_upstream_path "$ut")"
 check "up-nonrepo"     ""         "$(gst_upstream_path "$ut/nope")"
 rm -rf "$ut"
 
+# gst_is_perennial — a branch that never gets a PR of its own, so its CI is worth showing
+# even with no PR: the repo's default branch (origin/HEAD), or main/master when that ref is
+# absent (a hand-added remote never gets one).
+pt2="$(mktemp -d)"
+git -C "$pt2" init -q
+gst_is_perennial "$pt2" main;     check "per-nohead-main"    "0" "$?"
+gst_is_perennial "$pt2" master;   check "per-nohead-master"  "0" "$?"
+gst_is_perennial "$pt2" feat/x;   check "per-nohead-feature" "1" "$?"
+git -C "$pt2" remote add origin git@github.com:me/app.git
+git -C "$pt2" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+gst_is_perennial "$pt2" trunk;    check "per-default-branch" "0" "$?"
+gst_is_perennial "$pt2" main;     check "per-name-not-ref"   "1" "$?"
+gst_is_perennial "$pt2" "";       check "per-empty-branch"   "1" "$?"
+gst_is_perennial "$pt2/nope" main; check "per-nonrepo-main"  "0" "$?"
+rm -rf "$pt2"
+
 # gst_daemon_alive — true only when <pidfile> exists and names a live process. Backs the
 # poller's is_running check and its self-healing `start` (which relaunches when this is false).
 dtmp="$(mktemp)"
