@@ -110,7 +110,7 @@ gst_relative_time() {
   else printf '%dd ago\n' "$(( diff / 86400 ))"; fi
 }
 
-# Canonical CI status -> one of ok | fail | run | none.
+# Canonical CI status -> one of ok | fail | run | manual | none.
 # The sidebar publishes a SEPARATE token per bucket, because herdr's token style is
 # static config ({ token, fg, bold, dim }) with no conditional form: one token cannot
 # change colour by state, so the state has to live in the token NAME for the user's
@@ -121,6 +121,12 @@ gst_status_bucket() {
     failed)   printf 'fail' ;;
     running|pending|created|preparing|waiting_for_resource|scheduled)
               printf 'run' ;;
+    # `manual` (a GitLab pipeline waiting on a manual job, and GitHub's `action_required`)
+    # gets a bucket of its own rather than sharing `run`: both mean unfinished CI, but a
+    # running job resolves itself and this one never will until someone clicks it. Sharing
+    # `run` made the two indistinguishable, and folding it into `none` hid it outright for
+    # anyone who empties GST_ICON_NONE to drop branches with no CI at all.
+    manual)   printf 'manual' ;;
     *)        printf 'none' ;;
   esac
 }
@@ -133,6 +139,7 @@ gst_status_emoji() {
     ok)   printf '%s' "${GST_ICON_OK-🟢}" ;;
     fail) printf '%s' "${GST_ICON_FAIL-🔴}" ;;
     run)  printf '%s' "${GST_ICON_RUN-🟡}" ;;
+    manual) printf '%s' "${GST_ICON_MANUAL-🟣}" ;;
     *)    printf '%s' "${GST_ICON_NONE-⚪}" ;;
   esac
 }
@@ -338,7 +345,7 @@ gst_strip_ci_prefix() {
   # Configured glyphs first, then the emoji defaults — so labels decorated before an
   # icon-config change still strip instead of accumulating.
   for e in "${GST_ICON_OK-}" "${GST_ICON_RUN-}" "${GST_ICON_FAIL-}" \
-           "${GST_ICON_NONE-}" '🟢' '🟡' '🔴' '⚪'; do
+           "${GST_ICON_MANUAL-}" "${GST_ICON_NONE-}" '🟢' '🟡' '🔴' '🟣' '⚪'; do
     [ -n "$e" ] || continue      # an empty pattern would match anything
     if [ "${rest#"$e" }" != "$rest" ]; then rest="${rest#"$e" }"; break; fi
     if [ "${rest#"$e"}"  != "$rest" ]; then rest="${rest#"$e"}";  break; fi
@@ -434,7 +441,7 @@ gst_daemon_alive() {
 # they cannot collide with another plugin's (or with this plugin's own upstream ancestor,
 # which published bare `ci_*`/`review_*`/`mr`). GST_TOKEN_PREFIX overrides the prefix;
 # set it empty for bare names. Whatever it is must be mirrored in rows.
-GST_CI_BUCKETS='ok fail run none'
+GST_CI_BUCKETS='ok fail run manual none'
 GST_REVIEW_STATES='conflict changes draft approved awaiting required'
 GST_MERGE_STATES='auto done'
 gst_token_name() { printf '%s' "${GST_TOKEN_PREFIX-gst_}$1"; }

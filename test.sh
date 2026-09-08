@@ -38,6 +38,7 @@ check "rel-2m"      "2m ago"    "$(gst_relative_time '2026-06-25T08:30:00.000Z' 
 check "em-success"  "🟢" "$(gst_status_emoji success)"
 check "em-failed"   "🔴" "$(gst_status_emoji failed)"
 check "em-running"  "🟡" "$(gst_status_emoji running)"
+check "em-manual"   "🟣" "$(gst_status_emoji manual)"
 check "em-pending"  "🟡" "$(gst_status_emoji pending)"
 check "em-other"    "⚪" "$(gst_status_emoji canceled)"
 
@@ -597,6 +598,7 @@ check "ov-ok"         "X" "$(GST_ICON_OK=X gst_status_emoji success)"
 check "ov-fail"       "F" "$(GST_ICON_FAIL=F gst_status_emoji failed)"
 check "ov-run"        "R" "$(GST_ICON_RUN=R gst_status_emoji pending)"
 check "ov-none"       "N" "$(GST_ICON_NONE=N gst_status_emoji canceled)"
+check "ov-manual"     "M" "$(GST_ICON_MANUAL=M gst_status_emoji manual)"
 check "ov-approved"   "A" "$(GST_ICON_APPROVED=A gst_review_glyph approved)"
 check "ov-draft"      "D" "$(GST_ICON_DRAFT=D gst_review_glyph draft)"
 check "ov-conflict"   "C" "$(GST_ICON_CONFLICT=C gst_review_glyph conflict)"
@@ -637,6 +639,7 @@ check "bucket-fail"    "fail" "$(gst_status_bucket failed)"
 check "bucket-run"     "run"  "$(gst_status_bucket pending)"
 check "bucket-run-sch" "run"  "$(gst_status_bucket scheduled)"
 check "bucket-none"    "none" "$(gst_status_bucket canceled)"
+check "bucket-manual"  "manual" "$(gst_status_bucket manual)"
 check "bucket-empty"   "none" "$(gst_status_bucket '')"
 
 # gst_ci_cell — labelled cell, but a glyph hidden by a set-but-empty override stays
@@ -718,12 +721,12 @@ check "report-empty-state-clears-all" "0" "$?"
 
 : > "$ttmp/log"
 HERDR_BIN_PATH="$ttmp/herdr" TLOG="$ttmp/log" gst_clear_tokens wX 43
-for _t in gst_ci_ok gst_ci_fail gst_ci_run gst_ci_none gst_review_conflict \
+for _t in gst_ci_ok gst_ci_fail gst_ci_run gst_ci_manual gst_ci_none gst_review_conflict \
           gst_review_changes gst_review_draft gst_review_approved gst_review_awaiting \
           gst_review_required gst_pr gst_merge_auto gst_merge_done; do
   grep -q -- "--clear-token $_t" "$ttmp/log" || { check "clear-covers-$_t" "0" "1"; }
 done
-check "clear-covers-every-token" "13" "$(grep -o -- '--clear-token' "$ttmp/log" | wc -l | tr -d ' ')"
+check "clear-covers-every-token" "14" "$(grep -o -- '--clear-token' "$ttmp/log" | wc -l | tr -d ' ')"
 
 # poll-once publishes tokens and NEVER renames — the whole point of the migration. The
 # fake workspace carries a label decorated by a pre-token version ("🟢 #12 proj"); the old
@@ -733,7 +736,7 @@ tctl() { env HERDR_PLUGIN_STATE_DIR="$ttmp/state" HERDR_PLUGIN_CONFIG_DIR="$ttmp
              bash "$DIR/poller-ctl.sh" "$@"; }
 
 : > "$ttmp/log"; tctl poll-once >/dev/null 2>&1
-grep -q -- 'report-metadata wT --source git-status --token gst_ci_ok= --token gst_ci_fail= --token gst_ci_run= --token gst_ci_none= --token gst_review_conflict= --token gst_review_changes= --token gst_review_draft= --token gst_review_approved= --token gst_review_awaiting= --token gst_review_required= --token gst_pr= --token gst_merge_auto= --token gst_merge_done= --seq' "$ttmp/log"
+grep -q -- 'report-metadata wT --source git-status --token gst_ci_ok= --token gst_ci_fail= --token gst_ci_run= --token gst_ci_manual= --token gst_ci_none= --token gst_review_conflict= --token gst_review_changes= --token gst_review_draft= --token gst_review_approved= --token gst_review_awaiting= --token gst_review_required= --token gst_pr= --token gst_merge_auto= --token gst_merge_done= --seq' "$ttmp/log"
 check "poll-reports-all-tokens" "0" "$?"
 check "poll-single-report" "1" "$(grep -c 'report-metadata' "$ttmp/log")"
 grep -q -- '--ttl-ms 90000' "$ttmp/log"

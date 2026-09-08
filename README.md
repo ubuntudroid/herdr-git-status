@@ -135,6 +135,7 @@ rows = [
   [{ token = "$gst_ci_ok",   fg = "#9ece6a" },  # your theme's green
    { token = "$gst_ci_fail", fg = "#f7768e" },  # …red
    { token = "$gst_ci_run",  fg = "#e0af68" },  # …yellow
+   { token = "$gst_ci_manual", fg = "#ff9e64" }, # …orange: stalled until someone clicks
    { token = "$gst_ci_none", dim = true },
    { token = "$gst_review_conflict", fg = "#f7768e" },
    { token = "$gst_review_changes",  fg = "#e0af68" },
@@ -152,7 +153,7 @@ rows = [
 **Why one token per state.** herdr's token style is static config — `{ token, fg, bold, dim }`,
 with no conditional form — so one token cannot change colour by state. The state therefore lives
 in the token *name*: the poller publishes the CI cell under exactly one of `gst_ci_ok` /
-`gst_ci_fail` / `gst_ci_run` / `gst_ci_none`, the review glyph under exactly one of the six
+`gst_ci_fail` / `gst_ci_run` / `gst_ci_manual` / `gst_ci_none`, the review glyph under exactly one of the six
 `gst_review_*` names, and clears
 every sibling. Only one entry from each group ever renders, so a long-looking row stays short on
 screen. Drop the `fg`s and it all still works, just uncoloured.
@@ -346,12 +347,14 @@ echo "GST_REFRESH=20" >> "$(herdr plugin config-dir git-status)/.env"
   latency-bound, so this is what keeps it shorter than `GST_REFRESH` once you have more than a
   handful of spaces; 22 spaces went from ~33s serial to ~8s at the default. Raise it only if your
   provider tolerates the concurrency — GitHub's secondary rate limit counts parallel requests.
-- `GST_ICON_OK` / `_FAIL` / `_RUN` / `_NONE` — sidebar CI dot per state
-  (defaults `🟢` `🔴` `🟡` `⚪`). Set a var to *empty* to hide that dot. `_NONE` covers runs that
-  finished without a verdict — canceled, skipped, manual, unknown; a branch with no CI at all on its
-  remote head shows no cell regardless of this setting.
+- `GST_ICON_OK` / `_FAIL` / `_RUN` / `_MANUAL` / `_NONE` — sidebar CI dot per state
+  (defaults `🟢` `🔴` `🟡` `🟣` `⚪`). Set a var to *empty* to hide that dot. `_MANUAL` is CI that
+  has stalled until a person acts — a GitLab pipeline waiting on a manual job, a GitHub check that
+  is `action_required`; it is its own state because a `_RUN` job finishes on its own and this one
+  never will. `_NONE` covers runs that finished without a verdict — canceled, skipped, unknown; a
+  branch with no CI at all on its remote head shows no cell regardless of this setting.
 - `GST_TOKEN_PREFIX` — replaces the default `gst_` prefix on every sidebar token name (`ci_ok`,
-  `ci_fail`, `ci_run`, `ci_none`, `review_conflict`, `review_changes`, `review_draft`,
+  `ci_fail`, `ci_run`, `ci_manual`, `ci_none`, `review_conflict`, `review_changes`, `review_draft`,
   `review_approved`, `review_awaiting`, `review_required`, `pr`, `merge_auto`, `merge_done`). Set it to
   the empty string for
   bare, unprefixed names. Token names are one namespace shared by all plugins,
@@ -375,7 +378,9 @@ because they do not survive copy-paste through every editor — write them with
 ```sh
 # CI cell — one dot for every state, as in GitHub's commit-status dot. Colour carries
 # the state, so the glyph does not have to (see Configure the sidebar):
-#   OK / FAIL / RUN   nf-oct-dot_fill   U+F444
+#   OK / FAIL / RUN   nf-oct-dot_fill    U+F444
+#   MANUAL            nf-oct-alert_fill  U+F40C -- a shape, not just a colour: the amber of
+#                     RUN and any orange you pick for MANUAL are too close to tell apart.
 #   NONE              leave empty for no cell at all, or nf-oct-skip U+F517
 #
 # If your rows do NOT colour the gst_ci_* tokens, use distinct glyphs instead, matching
