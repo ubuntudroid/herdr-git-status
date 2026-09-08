@@ -74,7 +74,8 @@ check "gh-running"   "running"  "$(gst_github_status in_progress '')"
 check "gh-queued"    "pending"  "$(gst_github_status queued '')"
 check "gh-cancelled" "canceled" "$(gst_github_status completed cancelled)"
 check "gh-skipped"   "skipped"  "$(gst_github_status completed skipped)"
-check "gh-neutral"   "manual"   "$(gst_github_status completed neutral)"
+check "gh-neutral"   "skipped"  "$(gst_github_status completed neutral)"
+check "gh-action-req" "manual"  "$(gst_github_status completed action_required)"
 
 # gst_strip_ci_prefix with the #<num> PR token (GitHub)
 check "strip-emoji-pr"  "web app"  "$(gst_strip_ci_prefix '🟢 #42 web app')"

@@ -153,8 +153,12 @@ gst_github_status() {
     success)                           printf 'success' ;;
     failure|timed_out|startup_failure) printf 'failed' ;;
     cancelled|canceled)                printf 'canceled' ;;
-    skipped|stale)                     printf 'skipped' ;;
-    action_required|neutral)           printf 'manual' ;;
+    # `neutral` belongs with skipped, not with action_required: GitHub treats it as
+    # non-blocking — a neutral check leaves the commit green and `gh pr checks` prints it
+    # as "skipping". Ranked as manual it outranked every passing check, so one neutral
+    # Wiz scan blanked a whole space's CI cell while GitHub showed the PR as CLEAN.
+    skipped|stale|neutral)             printf 'skipped' ;;
+    action_required)                   printf 'manual' ;;
     *)                                 printf 'unknown' ;;
   esac
 }
