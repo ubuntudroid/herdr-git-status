@@ -17,8 +17,11 @@ tried.
 > **Would you consider adding a licence?**
 >
 > Hi — thanks for building this. I've been running a fork of it daily for a couple of months and
-> have built quite a lot on top: GitHub support alongside GitLab, a review-state model, namespaced
-> sidebar metadata tokens, reboot-surviving autostart, and a test suite that's now around 240 cases.
+> have built quite a lot on top. To be clear about what is yours and what is mine: you built the
+> plugin, including its GitHub support alongside GitLab and the review-state mapping for both
+> providers. What I added since is namespaced sidebar metadata tokens replacing the label writing,
+> merge/auto-merge cells on top of your review model, concurrent space polling, a reboot-surviving
+> `ensure` action, and a test suite grown from 97 `check` call sites to 248.
 >
 > I'd like to publish my version as a standalone plugin so other herdr users can install it — the
 > herdr marketplace excludes forks, so it would need to be its own repository rather than a fork of

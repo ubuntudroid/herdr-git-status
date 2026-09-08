@@ -482,9 +482,11 @@ behind by versions of this plugin that wrote the label. `restore` runs the same 
 
 This plugin began as a fork of **[krystof018/herdr-git-status](https://github.com/krystof018/herdr-git-status)**
 by krystof018, which originated the sidebar-status idea, the poller/pane split, and the shape of
-the detail pane. It has since diverged substantially — GitHub support, the review-state model,
-namespaced sidebar tokens, reboot-surviving autostart, and a much larger test suite are additions
-here — and it is maintained independently. It is **not** affiliated with or endorsed by the
+the detail pane, and both the GitHub and GitLab support along with the review-state mapping for
+each. It has since diverged substantially: replacing the workspace-label writing with namespaced
+sidebar metadata tokens, extending the review model with merge/auto-merge cells, concurrent space
+polling, a reboot-surviving `ensure` action, and a test suite grown from 97 `check` call sites to
+248 are additions here — and it is maintained independently. It is **not** affiliated with or endorsed by the
 original author, and bugs here should be reported here, not upstream.
 
 ## Licence
