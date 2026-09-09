@@ -719,10 +719,22 @@ GST_ROLLUP_MISSING_JQ='
 # the two guards that had already passed plus an OPTIONAL in-progress maestro job.
 # Output shape matches gst_github_checks_status: "canonical \t id \t url \t updated".
 gst_required_status() {
+  local out
   [ -n "$2" ] || return 0
-  { printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_TSV_JQ" 2>/dev/null
-    printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_MISSING_JQ" 2>/dev/null
-  } | gst_github_checks_status
+  out="$( { printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_TSV_JQ" 2>/dev/null
+            printf '%s' "$1" | jq -r --arg req "$2" "$GST_ROLLUP_MISSING_JQ" 2>/dev/null
+          } | gst_github_checks_status )"
+  # Every guard SKIPPED is a PASS, not a non-answer. Skipped already never vetoes here (it
+  # ranks last), so when it is the only thing left the honest reading is the same one: no
+  # guard is failing and nothing blocks the merge. Left as `skipped` it bucketed to `none`,
+  # whose glyph users empty out — so a PR with an optional check failing and every guard
+  # skipped showed NO cell at all. Seen on Photoroom/content_backend#3521 and #3522, where
+  # django-test / fastapi-test / migrations-checks were all SKIPPED and only the optional
+  # build-image failed; GitHub reported those as UNSTABLE-class, not blocked (compare #2885,
+  # APPROVED with the same shape: mergeStateStatus UNSTABLE, never BLOCKED). A guard with no
+  # row at all is a different fact — GitHub's "Expected: waiting" — and still counts pending.
+  case "$out" in skipped*) out="success${out#skipped}" ;; esac
+  printf '%s' "$out"
 }
 
 # gst_required_contexts <repo> <path> <base_branch>

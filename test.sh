@@ -470,6 +470,13 @@ check "req-unfiltered" "failed" "$(printf '%s' "$CR_JSON" \
 # Filtered to the merge guards, it does not — and a SKIPPED required check does not veto,
 # matching GitHub's merge box:
 check "req-filtered"   "success" "$(gst_required_status "$CR_JSON" "$REQ_3" | cut -f1)"
+# Every guard SKIPPED reads as a pass, not as "no verdict": skipped never vetoes, so with
+# nothing else in the narrowed set the answer is still "no guard is failing". Modelled on
+# Photoroom/content_backend#3522 — all three guards SKIPPED, optional build-image FAILED;
+# left as `skipped` the cell bucketed to `none` and vanished.
+check "req-all-skipped" "success" "$(gst_required_status "$CR_JSON" "fastapi-test" | cut -f1)"
+# ...and it keeps the winning run's id/url/updated columns, so the CI pane can still link it:
+check "req-all-skipped-cols" "3" "$(gst_required_status "$CR_JSON" "fastapi-test" | cut -f2)"
 # A required check that IS failing still wins:
 check "req-fail-wins"  "failed"  "$(gst_required_status "$CR_JSON" "$(printf 'django-test\nlint / pre_commit')" | cut -f1)"
 # Empty name list = "do not filter": prints nothing, caller keeps the unfiltered verdict.
