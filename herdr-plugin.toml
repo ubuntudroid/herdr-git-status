@@ -7,6 +7,12 @@ min_herdr_version = "0.8.0"   # workspace report-metadata (sidebar tokens)
 description = "CI and code-review status for GitHub and GitLab in herdr: a live colored dot, PR number, and review-state glyph published as `gst_ci_*`/`gst_review_*`/`gst_pr` sidebar metadata tokens (labels are never touched), plus on-demand CI-detail and 'My PRs' panes. Auto-detects the provider from the repo's origin host."
 platforms = ["linux", "macos"]
 
+# Brings the poller back after a reboot: herdr runs this once per server start,
+# after the session is restored and the socket is ready. `ensure` does nothing
+# unless the pidfile outlived its process, so a deliberate `stop` stays stopped.
+[[startup]]
+command = ["bash", "poller-ctl.sh", "ensure"]
+
 [[actions]]
 id = "open"
 title = "Open CI status pane"

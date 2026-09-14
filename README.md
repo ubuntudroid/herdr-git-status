@@ -286,53 +286,21 @@ has a branch pipeline.
 ## Autostart after reboot
 
 The poller is a detached daemon: it survives herdr restarts but dies with the
-machine. The `ensure` action restarts it only if it died unexpectedly (a
-leftover pidfile with a dead process). A deliberate `stop` removes the pidfile,
-so `ensure` never overrides it.
+machine. Nothing to set up — the manifest's `[[startup]]` hook runs `ensure`
+once per herdr server start (after the session is restored and the socket is
+ready), so the poller comes back with herdr. `ensure` restarts it only if it
+died unexpectedly (a leftover pidfile with a dead process). A deliberate `stop`
+removes the pidfile, so `ensure` never overrides it.
 
-Wire `ensure` to your service manager so it fires when the herdr server comes
-up — event-driven, no timers, cannot block sleep:
+The hook only runs the next time herdr starts, so linking alone starts nothing.
+Start the poller for the current session with `ctrl+b` then `i`, or:
 
-**macOS (launchd)** — `~/Library/LaunchAgents/dev.you.herdr-git-status-ensure.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>dev.you.herdr-git-status-ensure</string>
-  <key>ProgramArguments</key><array>
-    <string>/bin/sh</string><string>-c</string>
-    <string>test -S "$HOME/.config/herdr/herdr.sock" &amp;&amp; exec /absolute/path/to/herdr plugin action invoke git-status.ensure || true</string>
-  </array>
-  <key>WatchPaths</key><array><string>/Users/you/.config/herdr/herdr.sock</string></array>
-  <key>RunAtLoad</key><true/>
-</dict></plist>
+```sh
+herdr plugin action invoke git-status.start
 ```
-
-WatchPaths and the herdr command path need absolute paths (launchd expands nothing). For the command path, substitute the output of `command -v herdr` so it uses your actual herdr binary, not the minimal PATH. Load it with
-`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<name>.plist`.
-
-**Linux (systemd user units)**:
-
-```ini
-# ~/.config/systemd/user/herdr-git-status-ensure.path
-[Path]
-PathExists=%h/.config/herdr/herdr.sock
-[Install]
-WantedBy=default.target
-
-# ~/.config/systemd/user/herdr-git-status-ensure.service
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/env herdr plugin action invoke git-status.ensure
-```
-
-Enable with `systemctl --user enable --now herdr-git-status-ensure.path`.
-The service stays active after the first trigger, ensuring the poller survives herdr restarts during the login session.
 
 If the poller crashes while herdr keeps running, nothing re-fires until the
-next herdr start — restart manually or add a timer if that ever matters.
+next herdr start — restart it the same way if that ever matters.
 
 ## Configuration
 
