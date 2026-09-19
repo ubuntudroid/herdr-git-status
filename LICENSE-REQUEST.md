@@ -1,14 +1,19 @@
 # Licence request to the upstream author
 
-**Status:** SENT 2026-08-29 as a pull request, awaiting response.
-**PR:** https://github.com/krystof018/herdr-git-status/pull/14 — "Add MIT license", one file, based
-on `upstream/main` so the diff contains nothing but `LICENSE`. Merging it is the only action needed
-from the maintainer.
-**To:** Kryštof Prášil / krystof018 (https://github.com/krystof018)
+**Status:** BOTH ROUTES SENT. No reply from either. **Decision point 2026-10-03** — if nothing by
+then, treat the matter as settled and stop chasing it (see "If no reply").
 
-Delete this file once the PR is merged and the licence is reflected in the README.
-The issue text below is kept as a fallback if the PR goes unanswered and another contact route is
-tried.
+1. **PR, 2026-08-29:** https://github.com/krystof018/herdr-git-status/pull/14 — "Add MIT license",
+   one file, based on `upstream/main` so the diff contains nothing but `LICENSE`. Merging it is the
+   only action needed. As of 2026-09-19: open, zero comments, zero reviews.
+2. **Email, 2026-09-19:** sent by Sven to `contact@krystofprasil.com` (a real address, taken from the
+   commit metadata on `upstream/main` — not a GitHub noreply). Same ask, different channel, on the
+   theory that repo notifications are not somewhere he is looking.
+
+**To:** Kryštof Prášil / krystof018 (https://github.com/krystof018), site krystofprasil.cz
+
+No further contact attempts — two channels is enough, and a third would be pestering. Delete this
+file once the PR is merged and the licence is reflected in the README.
 
 ---
 
@@ -61,9 +66,13 @@ Attribution in the README is good practice but does not substitute for a licence
 
 ## If no reply
 
-Options, roughly in order of preference:
+Both contact routes are now spent, so option 2 below is closed. From 2026-10-03, default to
+option 1 and stop spending attention on this.
 
-1. Keep using it privately as a GitHub fork — fully permitted today, no action needed.
-2. Ask again after a reasonable interval, or try another contact route.
+1. **Keep it as a GitHub fork — the default.** Fully permitted today, no action needed. Costs almost
+   nothing: `herdr plugin install ubuntudroid/herdr-git-status` already works for anyone, so the only
+   thing a missing licence actually costs is the marketplace card, and that is gated on herdr policy
+   (discussion #3765) rather than on Kryštof.
+2. ~~Ask again / another route~~ — spent: PR 2026-08-29, email 2026-09-19.
 3. Rewrite the surviving upstream portions. Note this is *not* a true clean-room rewrite if done
    with the original in view; it reduces legal risk without eliminating it.
