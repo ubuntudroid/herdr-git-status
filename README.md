@@ -464,16 +464,10 @@ original author, and bugs here should be reported here, not upstream.
 
 ## Licence
 
-> **Status: unlicensed — redistribution is not yet permitted.**
->
-> The upstream project this is derived from carries no licence file and no licence grant, so by
-> default all rights in the code inherited from it remain reserved to its author. Until an explicit
-> grant is obtained, this repository may not be redistributed, published to the herdr plugin
-> marketplace, or relicensed — and no licence can be declared here, because the derived portions
-> are not the maintainer's to license.
->
-> A licence has been requested from the original author as a one-file pull request adding MIT:
-> [krystof018/herdr-git-status#14](https://github.com/krystof018/herdr-git-status/pull/14)
-> (opened 2026-08-29, awaiting response). If it is merged, this section will be replaced with the
-> MIT licence and this repository becomes publishable. Use it locally at your own discretion in the
-> meantime.
+[MIT](LICENSE) — `Copyright (c) 2026 Kryštof Prášil`, the original author, whose copyright notice
+this project retains as the licence requires.
+
+The upstream project carried no licence for its first three months, which meant everything derived
+from it was all-rights-reserved by default. Kryštof added MIT on 2026-09-20
+([krystof018/herdr-git-status#14](https://github.com/krystof018/herdr-git-status/pull/14)), which is
+what makes this fork redistributable at all. Thanks to him for that.
